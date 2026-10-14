@@ -201,7 +201,7 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
       const type=byExt[(file.name.split('.').pop()||'').toLowerCase()] || file.type;
       const result=await uploadFile(file,type,report);
       if (videoEpochs.get(slot)!==epoch) return;
-      video.pause(); video.src=result.url; video.hidden=false; video.load(); card.querySelector('.video-placeholder').hidden=true;
+      video.pause(); video.removeAttribute('poster'); video.src=result.url; video.hidden=false; video.load(); card.querySelector('.video-placeholder').hidden=true;
       card.dataset.mediaName=file.name; markDirty(); const saved = await saveChanges();
       failedVideoSlots.delete(slot);
       progress.textContent = saved === true && !dirty ? 'Video i nacrt su spremljeni. Klikni „Spremi i objavi”.' : 'Video je prenesen, ali nacrt još nije spremljen. Klikni „Spremi i objavi” i pričekaj potvrdu.';
@@ -234,8 +234,13 @@ function applyDocument(doc) {
   for(const state of doc.videos){
     const card=document.querySelector('[data-video-slot="'+state.slot+'"]');if(!card)continue;
     const video=card.querySelector('video');
-    if(state.src){video.src=state.src;video.hidden=false;card.querySelector('.video-placeholder').hidden=true;}
-    else{video.removeAttribute('src');video.hidden=true;card.querySelector('.video-placeholder').hidden=false;}
+    if(state.src){
+      const poster=window.PortfolioPosters?.[state.src];
+      if(poster)video.poster=poster;else video.removeAttribute('poster');
+      video.style.backgroundColor='var(--sand)';
+      video.src=state.src;video.hidden=false;card.querySelector('.video-placeholder').hidden=true;
+    }
+    else{video.removeAttribute('src');video.removeAttribute('poster');video.hidden=true;card.querySelector('.video-placeholder').hidden=false;}
     card.dataset.mediaName=state.name||'';
   }
 }

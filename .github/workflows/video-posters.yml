@@ -1,0 +1,37 @@
+name: Prepare video cover images
+on:
+  push:
+    branches: [video-cover-images]
+    paths: ['.github/workflows/video-posters.yml']
+permissions:
+  contents: write
+jobs:
+  posters:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: video-cover-images
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Extract cover images from verified public videos
+        shell: python
+        run: |
+          import pathlib,json,subprocess
+          copies=json.loads(pathlib.Path('public/viewing-videos/verification.json').read_text())
+          posters={}
+          for src,copy in copies.items():
+            video=pathlib.Path('public'+copy['url'])
+            poster=video.with_suffix('.jpg')
+            subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-ss','1','-i',str(video),'-vf','thumbnail=60,scale=540:-2','-frames:v','1','-q:v','2',str(poster)],check=True,timeout=60)
+            assert poster.stat().st_size>1000
+            posters[src]='/viewing-videos/'+poster.name
+          pathlib.Path('public/video-posters.js').write_text('window.PortfolioPosters='+json.dumps(posters)+';\n')
+          print('Generated',len(posters),'video cover images')
+      - name: Save covers on preparation branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/viewing-videos/*.jpg public/video-posters.js
+          git commit -m 'Add immediate cover images for all five published videos'
+          git push origin HEAD:video-cover-images
