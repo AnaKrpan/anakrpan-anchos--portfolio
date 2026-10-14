@@ -8,7 +8,7 @@ import vm from 'node:vm';
 class MemoryStore {
   values = new Map(); sequence = 0; hook = null;
   async set(key, value, options = {}) {
-    if (this.hook) { const hook = this.hook; this.hook = null; await hook(key); }
+    if (this.hook && key === 'state') { const hook = this.hook; this.hook = null; await hook(key); }
     const old = this.values.get(key);
     if (options.onlyIfNew && old || options.onlyIfMatch && old?.etag !== options.onlyIfMatch) return { modified: false };
     const data = typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
@@ -29,7 +29,7 @@ class MemoryStore {
 const password = 'test-only-password-with-many-characters';
 function setup() {
   const store = new MemoryStore(); let time = Date.now();
-  const app = createPortfolio({ store, password, initialDocument, now: () => time });
+  const app = createPortfolio({ store, password, initialDocument, now: () => time, log: () => {} });
   let cookie = '';
   async function call(path, options = {}) {
     const headers = new Headers(options.headers);
@@ -62,7 +62,7 @@ test('secure cookie authenticates owner, expires and is invalidated by changing 
   for (const flag of ['Secure', 'HttpOnly', 'SameSite=Strict', 'Path=/']) assert.ok(response.headers.get('set-cookie').includes(flag));
   assert.equal((await (await env.call('/api/session')).json()).canEdit, true);
   assert.equal(await (await env.call('/uredi')).text(), 'private-editor');
-  const changed = createPortfolio({ store: env.store, password: password + 'changed', initialDocument });
+  const changed = createPortfolio({ store: env.store, password: password + 'changed', initialDocument, log: () => {} });
   const session = await changed.fetch(new Request('https://portfolio.example/api/session', { headers: { cookie: env.cookie() } }));
   assert.equal((await session.json()).canEdit, false);
   env.expire(); assert.equal((await env.call('/api/draft')).status, 401);
@@ -135,12 +135,12 @@ test('chunk upload persists binary video; private until published; public byte r
   const largeSuffix = await env.call(media, { auth: false, headers: { range: 'bytes=-1048590' } });
   assert.deepEqual(new Uint8Array(await largeSuffix.arrayBuffer()), bytes.slice(-1048590));
   const head = await env.call(media, { auth: false, method: 'HEAD' }); assert.equal(head.headers.get('content-length'), String(size)); assert.equal(await head.text(), '');
-  const freshRuntime = createPortfolio({ store: env.store, password, initialDocument: { ...initialDocument, title: 'A later code deploy' } });
+  const freshRuntime = createPortfolio({ store: env.store, password, initialDocument: { ...initialDocument, title: 'A later code deploy' }, log: () => {} });
   const stillSaved = await freshRuntime.fetch(new Request('https://portfolio.example/api/content')); assert.equal((await stillSaved.json()).document.videos[0].src, media);
 });
 
 test('owner setup fails closed and repeated wrong passwords are throttled', async () => {
-  const store = new MemoryStore(), unconfigured = createPortfolio({ store, password: '', initialDocument });
+  const store = new MemoryStore(), unconfigured = createPortfolio({ store, password: '', initialDocument, log: () => {} });
   const response = await unconfigured.fetch(new Request('https://portfolio.example/api/login', { method: 'POST', headers: { origin: 'https://portfolio.example' }, body: JSON.stringify({ password: '' }) })); assert.equal(response.status, 503);
   const env = setup();
   for (let attempt = 0; attempt < 10; attempt++) assert.equal((await env.call('/api/login', { method: 'POST', body: { password: 'wrong' } })).status, 401);
@@ -157,26 +157,6 @@ test('previously uploaded videos using 2 MB chunks still play after reducing upl
   await env.store.setJSON('state', { draft: null, published: { document: saved, revision: 1 } });
   const response = await env.call('/media/' + file, { auth: false, headers: { range: 'bytes=2097140-2097170' } });
   assert.equal(response.status, 206); assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes.slice(2097140, 2097171));
-});
-
-test('mobile upload queue retries failed chunks and uploads files sequentially', async () => {
-  const source = await readFile(new URL('../public/online-script.js', import.meta.url), 'utf8');
-  const code = source.slice(source.indexOf('let uploadQueue ='), source.indexOf('async function addPhoto'));
-  let attempts = 0, active = 0, maximum = 0, completed = 0, created = 0;
-  const context = vm.createContext({ AbortController, message() {}, setTimeout: (fn, ms) => ms < 45000 ? setTimeout(fn, 0) : 0, clearTimeout() {}, requestJSON: async (path, options) => {
-    active++; maximum = Math.max(maximum, active);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1));
-      if (path.endsWith('/start')) return { id: 'upload-' + ++created, partSize: 512 * 1024 };
-      if (path.includes('/part?')) { attempts++; if (attempts <= 2) { const error = new Error('Temporary network failure'); error.status = 503; throw error; } return { partNumber: Number(path.split('part=')[1]), etag: 'test' }; }
-      if (path.endsWith('/complete')) { const data = JSON.parse(options.body); assert.equal(data.parts.length, 3); return { url: '/media/file-' + ++completed }; }
-      throw new Error('Unexpected request');
-    } finally { active--; }
-  } });
-  vm.runInContext(code + ';globalThis.transfer=uploadFile;', context);
-  const file = new Blob([new Uint8Array(1024 * 1024 + 20)]);
-  const results = await Promise.all([context.transfer(file, 'video/mp4'), context.transfer(file, 'video/mp4')]);
-  assert.equal(results.length, 2); assert.equal(created, 2); assert.equal(completed, 2); assert.equal(attempts, 8); assert.equal(maximum, 1);
 });
 
 test('821 MB video is accepted and finalized in small retryable batches without loading video into memory', async () => {
@@ -206,23 +186,30 @@ test('821 MB video is accepted and finalized in small retryable batches without 
   const overLimit = await env.call('/api/media/start', { method: 'POST', body: { type: 'video/mp4', size: 2 * 1024 * 1024 * 1024 + 1 } }); assert.equal(overLimit.status, 400); assert.match((await overLimit.json()).error, /2 GB/);
 });
 
-test('failed mobile upload can resume by selecting the same file without resending confirmed chunks', async () => {
-  const source = await readFile(new URL('../public/online-script.js', import.meta.url), 'utf8');
-  const code = source.slice(source.indexOf('let uploadQueue ='), source.indexOf('async function addPhoto'));
-  let starts = 0, firstParts = 0, failures = 0;
-  const context = vm.createContext({ AbortController, message() {}, setTimeout: (fn, ms) => ms < 45000 ? setTimeout(fn, 0) : 0, clearTimeout() {}, requestJSON: async (path, options) => {
-    if (path.endsWith('/start')) { starts++; return { id: 'resume-id', partSize: 512 * 1024 }; }
-    if (path.includes('/part?')) {
-      const partNumber = Number(path.split('part=')[1]); if (partNumber === 1) firstParts++;
-      if (partNumber === 2 && failures++ < 4) { const error = new Error('Lost connection'); error.status = 503; throw error; }
-      return { partNumber, etag: 'test' };
-    }
-    if (path.endsWith('/complete')) { assert.equal(JSON.parse(options.body).parts.length, 3); return { url: '/media/resumed.mp4' }; }
-    throw new Error('Unexpected request; a failed transfer must not abort and delete stored chunks.');
-  } });
-  vm.runInContext(code + ';globalThis.transfer=uploadFile;', context);
-  const file = new Blob([new Uint8Array(1024 * 1024 + 20)]);
-  await assert.rejects(context.transfer(file, 'video/mp4'), /ponovno odaberi istu datoteku/);
-  assert.equal((await context.transfer(file, 'video/mp4')).url, '/media/resumed.mp4');
-  assert.equal(starts, 1); assert.equal(firstParts, 1);
+test('server resume index returns the same upload and status recovers persisted chunk acknowledgements', async () => {
+  const env=setup(); await env.login();
+  const body={type:'video/mp4',size:512*1024+10,fingerprint:'a'.repeat(64)};
+  const first=await (await env.call('/api/media/start',{method:'POST',body})).json();
+  const bytes=new Uint8Array(512*1024);
+  const receipt=await (await env.call('/api/media/part?id='+first.id+'&part=1',{method:'PUT',body:bytes})).json();
+  const resumed=await (await env.call('/api/media/start',{method:'POST',body})).json();
+  assert.equal(resumed.id,first.id); assert.equal(resumed.resumed,true);
+  const status=await (await env.call('/api/media/status?id='+first.id)).json();
+  assert.deepEqual(status.receipts,[receipt]); assert.equal(status.nextPart,1);
+  assert.equal((await env.call('/api/media/status?id='+first.id,{auth:false})).status,401);
 });
+
+test('changing a draft archives previous state and never deletes its existing media bytes', async () => {
+  const env=setup(); await env.login();
+  await env.call('/api/draft',{method:'PUT',body:{document:doc(),revision:0}});
+  await env.call('/api/publish',{method:'POST',body:{revision:1}});
+  const previous=await env.store.get('state',{type:'json'});
+  const marker=new Uint8Array([4,5,6]); await env.store.set('parts/existing/1',marker.buffer);
+  const changed=doc(); changed.texts[0]='Changed privately';
+  assert.equal((await env.call('/api/draft',{method:'PUT',body:{document:changed,revision:1}})).status,200);
+  const histories=await Promise.all([...env.store.values.keys()].filter(key=>key.startsWith('history/')).map(key=>env.store.get(key,{type:'json'})));
+  assert(histories.some(item=>JSON.stringify(item)===JSON.stringify(previous)));
+  assert.deepEqual(new Uint8Array(await env.store.get('parts/existing/1',{type:'arrayBuffer'})),marker);
+  assert.deepEqual((await (await env.call('/api/content')).json()).document,initialDocument);
+});
+

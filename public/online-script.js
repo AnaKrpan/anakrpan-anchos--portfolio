@@ -131,7 +131,7 @@ async function requestJSON(path, options = {}) {
   try { response = await fetch(path, { credentials:'same-origin', ...options }); }
   catch (error) { throw new Error(error.name === 'AbortError' ? 'Veza je prespora ili je prekinuta.' : 'Veza sa stranicom je prekinuta.'); }
   let data; try { data = await response.json(); } catch (_) { throw new Error('Veza sa stranicom nije dostupna. Izmjene su zadržane u ovoj kartici.'); }
-  if (!response.ok) { const error = new Error(data.error || 'Spremanje nije uspjelo.'); error.status = response.status; throw error; }
+  if (!response.ok) { const error = new Error(data.error || 'Spremanje nije uspjelo.'); error.status = response.status; error.trace = data.trace; throw error; }
   return data;
 }
 function setSaveButton() { exportButton.disabled = !!saving || publishing || pendingFiles > 0 || !canEdit; exportButton.textContent = publishing ? 'Objavljujem…' : saving ? 'Spremam nacrt…' : 'Spremi i objavi'; }
@@ -168,56 +168,8 @@ async function saveChanges() {
   if (result && dirty) { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveChanges(),300); }
   return result;
 }
-let uploadQueue = Promise.resolve();
-const unfinishedUploads = new Map();
-async function requestUploadPart(path, options, report) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45000);
-    try { return await requestJSON(path, {...options, signal:controller.signal}); }
-    catch (error) {
-      const retryable = !error.status || [408,429,500,502,503,504].includes(error.status);
-      if (!retryable || attempt === 3) throw error;
-      report('Veza je zapela. Ponavljam ovaj dio videa…');
-      await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
-    } finally { clearTimeout(timeout); }
-  }
-}
-function uploadFile(file, type, report = message) {
-  const transfer = async () => {
-    const fileKey = [file.name || '',file.size,file.lastModified || 0,type].join(':');
-    let state = unfinishedUploads.get(fileKey);
-    if (!state) {
-      report('Počinjem učitavanje…');
-      const created = await requestJSON('/api/media/start', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,size:file.size})});
-      state = {created,parts:[],verified:0}; unfinishedUploads.set(fileKey,state);
-    }
-    const created = state.created;
-    try {
-      const parts = state.parts, partSize = created.partSize || 512*1024;
-      for (let offset = parts.length*partSize, part = parts.length+1; offset < file.size; offset += partSize, part++) {
-        const result = await requestUploadPart('/api/media/part?id='+encodeURIComponent(created.id)+'&part='+part, {method:'PUT',headers:{'content-type':'application/octet-stream'},body:file.slice(offset,offset+partSize)}, report);
-        parts.push(result);
-        report('Učitano: ' + Math.round(Math.min(offset+partSize,file.size)/file.size*100) + ' %');
-      }
-      for (let offset = state.verified; offset < parts.length;) {
-        report('Video je prenesen. Provjeravam spremanje: ' + Math.round(offset/parts.length*100) + ' %…');
-        const result = await requestUploadPart('/api/media/complete', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id,offset,parts:parts.slice(offset,offset+64)})}, report);
-        if (result.url) { unfinishedUploads.delete(fileKey); return result; }
-        if (!result.continue || !Number.isInteger(result.nextPart) || result.nextPart <= offset || result.nextPart >= parts.length) throw new Error('Provjera datoteke nije završena. Pokušaj ponovno.');
-        offset = result.nextPart; state.verified = offset;
-      }
-      throw new Error('Spremanje videa nije završeno.');
-    } catch (error) {
-      if ([404,410].includes(error.status)) unfinishedUploads.delete(fileKey);
-      throw new Error(error.message + ' Ostavi ovu karticu otvorenu i ponovno odaberi istu datoteku da nastaviš učitavanje.');
-    }
-  };
-  report('Datoteka čeka svoj red za učitavanje…');
-  const task = uploadQueue.then(transfer);
-  uploadQueue = task.catch(() => {});
-  return task;
-}
+const uploads = PortfolioUploads.createUploader({request:requestJSON});
+const uploadFile = (file,type,report=message) => uploads.upload(file,type,report);
 async function addPhoto(file,target) {
   if (!file || !target) return;
   const epoch = (photoEpochs.get(target)||0)+1; photoEpochs.set(target,epoch);
@@ -245,7 +197,8 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
       const result=await uploadFile(file,type,report);
       if (videoEpochs.get(slot)!==epoch) return;
       video.pause(); video.src=result.url; video.hidden=false; video.load(); card.querySelector('.video-placeholder').hidden=true;
-      card.dataset.mediaName=file.name; markDirty(); await saveChanges(); progress.textContent='Video je učitan. Klikni „Spremi i objavi” za javnu objavu.';
+      card.dataset.mediaName=file.name; markDirty(); const saved = await saveChanges();
+      progress.textContent = saved === true && !dirty ? 'Video i nacrt su spremljeni. Klikni „Spremi i objavi”.' : 'Video je prenesen, ali nacrt još nije spremljen. Klikni „Spremi i objavi” i pričekaj potvrdu.';
     } catch (error) { report(error.message+' Prethodni video i ostale izmjene su zadržani.'); }
     finally { pendingFiles--; setSaveButton(); if (dirty && !pendingFiles) saveChanges(); }
   });
@@ -289,7 +242,7 @@ exportButton.addEventListener('click',async () => {
   finally{publishing=false;setSaveButton();}
 });
 document.addEventListener('input',event => {if(editing&&(event.target.closest('[data-edit]')||event.target.closest('.editor-fields')))markDirty();});
-window.addEventListener('beforeunload',event => {if(dirty||pendingFiles||saving){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event => {if(dirty||pendingFiles||saving||uploads.hasInterrupted()){event.preventDefault();event.returnValue='';}});
 const draftReady = (async () => {
   document.querySelector('#start-edit').hidden=true;
   try {

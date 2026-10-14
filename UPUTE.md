@@ -20,7 +20,7 @@ Portfolio s javnom objavom i privatnim uređivanjem, pripremljen za Netlify.
 - Klikni „Spremi i objavi”. Tek tada posjetitelji na istom javnom linku vide novi sadržaj.
 - „Pogledaj objavljeni portfolio” otvara javnu verziju. „Odjavi se” zaključava uređivanje na tvom uređaju.
 
-Ako se pojavi greška pri prijenosu videa, ostavi karticu otvorenu i ponovno odaberi istu datoteku. Prijenos nastavlja od zadnjeg potvrđenog dijela; ne osvježavaj karticu tijekom prijenosa. Ako se pojavi greška pri spremanju, ostavi karticu otvorenu i pokušaj ponovno. Stara objavljena verzija ostaje dostupna. Odjavljeni posjetitelji nemaju pristup nacrtu ni neobjavljenim datotekama. Sam javni link nije lozinka i možeš ga slobodno slati brendovima.
+Ako se pojavi greška pri prijenosu videa, ostavi karticu otvorenu i ponovno odaberi istu datoteku. Prijenos nastavlja od zadnjeg potvrđenog dijela. Nova verzija pamti napredak u pregledniku i na serveru: i nakon ponovnog otvaranja dovoljno je ponovno odabrati isti izvorni video. Prijenos se može nastaviti sedam dana; preglednik mora ponovno dobiti pristup datoteci. Izvorni video ne sprema se u localStorage niti se rekomprimira. Ako se pojavi greška pri spremanju, ostavi karticu otvorenu i pokušaj ponovno. Stara objavljena verzija ostaje dostupna. Odjavljeni posjetitelji nemaju pristup nacrtu ni neobjavljenim datotekama. Sam javni link nije lozinka i možeš ga slobodno slati brendovima.
 
 ## Sadržaj i trajna pohrana
 
@@ -33,3 +33,9 @@ Free plan ima mjesečno ograničenje potrošnje, uključujući promet videa. Kad
 ## Provjera
 
 `npm test` provjerava odvojeni javni sadržaj/nacrt, zaključavanje uređivanja, sesije, sukobe verzija, objavu, chunk upload i raspon bajtova za video. Testovi koriste memorijsku zamjenu za Netlify Blobs; produkcijska objava i stvarna reprodukcija na mobitelu provjeravaju se nakon Netlify deploya.
+
+## Popravak video-repair-v2
+
+Biblioteka za pohranu ažurirana je na @netlify/blobs 11.1.4 radi ispravnog uvjetnog spremanja i zatvaranja mrežnih odgovora. Napredak se pamti u IndexedDB-u, a server koristi zaštićeni indeks izvorne datoteke za pronalaženje prijenosa. Potvrde izgubljene pri prekidu veze dohvaćaju se sa servera. Završna provjera šalje po osam dijelova, najviše četiri operacije pohrane istodobno. Nove povijesne kopije `state` zapisa spremaju se pod `history/` prije njegove zamjene. Ovo čuva buduće verzije nacrta i objave; nije retroaktivna sigurnosna kopija starih stanja niti izvoz svih videa.
+
+Postojeći naziv spremišta, objekti, dizajn i javna adresa nisu promijenjeni. Ne brišu se dovršeni ni prekinuti prijenosi. /api/health vraća oznaku verzije i provjerava dostupnost pohrane. GitHub Actions provjerava instaliranu SDK biblioteku te potom odjavljeni pristup javnoj produkciji i dostupnim objavljenim video rasponima. Za konačnu potvrdu originalnog 821 MB videa potreban je prijenos na vlasničinom uređaju.

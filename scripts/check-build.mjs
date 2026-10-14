@@ -6,7 +6,7 @@ assert.equal(initial.videos.length, 5);
 assert.equal(initial.photos.length, 7);
 assert.equal((page.match(/data-edit=""/g) || []).length, initial.texts.length);
 for (const photo of initial.photos) await readFile('public/' + photo.src);
-for (const file of ['online-script.js', 'photo-tools.js', 'collaboration-tools.js', 'media-tools.js', 'prijava.html']) await readFile('public/' + file);
+for (const file of ['online-script.js', 'upload-tools.js', 'photo-tools.js', 'collaboration-tools.js', 'media-tools.js', 'prijava.html']) await readFile('public/' + file);
 assert(!page.includes('signin-with-chatgpt'));
 assert(!page.includes('localStorage'));
 assert(!page.includes('Preuzmi promjene'));

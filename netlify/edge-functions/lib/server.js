@@ -3,6 +3,7 @@ const LEGACY_PART_SIZE = 2 * 1024 * 1024;
 const MAX_SIZE = 2 * 1024 * 1024 * 1024;
 const COOKIE = '__Host-anchos-owner';
 const SESSION_SECONDS = 8 * 60 * 60;
+const UPLOAD_TTL = 7 * 24 * 60 * 60 * 1000;
 const encoder = new TextEncoder();
 const TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'video/ogg': 'ogv', 'video/x-m4v': 'm4v' };
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json;charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...extra } });
@@ -57,7 +58,7 @@ function uploadKey(id) {
   return 'uploads/' + id;
 }
 const partKey = (id, part) => 'parts/' + id + '/' + part;
-export function createPortfolio({ store, password, initialDocument, now = () => Date.now() }) {
+export function createPortfolio({ store, password, initialDocument, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
   const get = (key, type = 'json') => store.get(key, { type, consistency: 'strong' });
   const entry = (key, type = 'json') => store.getWithMetadata(key, { type, consistency: 'strong' });
   const emptyState = () => ({ draft: null, published: null });
@@ -82,12 +83,15 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
   }
   async function owner(request) { if (!await authorized(request)) fail(401, 'Prijavi se za uređivanje portfolija.'); }
   async function mutateState(previous, value) {
+    // Keep an immutable recovery copy before replacing any existing state.
+    // The production store and every existing media key remain unchanged.
+    if (previous) await store.setJSON('history/' + await hash(encoder.encode(previous.etag)), previous.data, { onlyIfNew: true });
     const result = await store.setJSON('state', value, previous ? { onlyIfMatch: previous.etag } : { onlyIfNew: true });
     if (!result.modified) fail(409, 'Postoji noviji nacrt. Tvoje izmjene su zadržane u ovoj kartici.');
   }
   async function uploadSession(id) {
     const result = await get(uploadKey(id));
-    if (!result || now() - result.createdAt > 24 * 60 * 60 * 1000) fail(410, 'Učitavanje je isteklo. Ponovno odaberi datoteku.');
+    if (!result || now() - result.createdAt > UPLOAD_TTL) fail(410, 'Učitavanje je isteklo. Ponovno odaberi datoteku.');
     return result;
   }
   async function loginLimit(ip) {
@@ -103,7 +107,12 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
   }
   return { async fetch(request, context = {}) {
     const url = new URL(request.url), path = url.pathname;
+    const startedAt = now(), trace = crypto.randomUUID();
     try {
+      if (path === '/api/health' && request.method === 'GET') {
+        await store.getMetadata('state', { consistency: 'strong' });
+        return json({ ready: true, build: 'video-repair-v2' });
+      }
       if (path === '/uredi' && ['GET', 'HEAD'].includes(request.method)) {
         const destination = await authorized(request) ? '/index.html' : '/prijava.html';
         if (destination === '/prijava.html') return Response.redirect(url.origin + destination, 302);
@@ -160,9 +169,45 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         if (!ext) fail(400, 'Ovaj format nije podržan. Za video odaberi MP4, MOV, WEBM, M4V ili OGV.');
         if (!Number.isSafeInteger(data.size) || data.size < 1) fail(400, 'Odabrana datoteka je prazna ili je nije moguće pročitati.');
         if (data.size > MAX_SIZE) fail(400, 'Video ima ' + Math.ceil(data.size / 1024 / 1024) + ' MB. Dopušteno je do 2 GB po videu.');
+        const fingerprint = data.fingerprint;
+        if (fingerprint !== undefined && !/^[a-f0-9]{64}$/.test(fingerprint)) fail(400, 'Neispravna potvrda izvorne datoteke.');
+        if (fingerprint) {
+          const existing = await get('upload-index/' + fingerprint);
+          if (existing) {
+            const session = await get(uploadKey(existing.id));
+            if (session && now() - session.createdAt <= UPLOAD_TTL && session.size === data.size && session.type === data.type) {
+              return json({ id: session.id, partSize: session.partSize || LEGACY_PART_SIZE, verifyBatch: 8, resumed: true });
+            }
+          }
+        }
         const id = crypto.randomUUID();
-        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, partSize: PART_SIZE, verified: 0, createdAt: now() });
-        return json({ id, partSize: PART_SIZE });
+        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, partSize: PART_SIZE, verified: 0, createdAt: now(), fingerprint: fingerprint || '' });
+        if (fingerprint) {
+          const key = 'upload-index/' + fingerprint, old = await entry(key);
+          const saved = await store.setJSON(key, { id }, old ? { onlyIfMatch: old.etag } : { onlyIfNew: true });
+          if (!saved.modified) fail(409, 'Ista datoteka se učitava u drugoj kartici. Pokušaj ponovno.');
+        }
+        return json({ id, partSize: PART_SIZE, verifyBatch: 8, resumed: false });
+      }
+      if (path === '/api/media/status' && request.method === 'GET') {
+        await owner(request);
+        const id = url.searchParams.get('id'), session = await uploadSession(id);
+        const partSize = session.partSize || LEGACY_PART_SIZE, count = Math.ceil(session.size / partSize);
+        const completed = await get('media/' + session.file);
+        if (completed) return json({ completed: true, url: '/media/' + session.file, partSize, count, verified: count });
+        const offset = Number(url.searchParams.get('offset') || 0);
+        if (!Number.isInteger(offset) || offset < 0 || offset >= count) fail(400, 'Neispravan nastavak prijenosa.');
+        const receipts = [];
+        for (let base = offset; base < Math.min(count, offset + 16); base += 4) {
+          const group = await Promise.all(Array.from({ length: Math.min(4, count - base, offset + 16 - base) }, async (_, i) => {
+            const partNumber = base + i + 1;
+            const actual = await store.getMetadata(partKey(id, partNumber), { consistency: 'strong' });
+            const expected = Math.min(partSize, session.size - (partNumber - 1) * partSize);
+            return actual && actual.metadata.size === expected && /^[a-f0-9]{64}$/.test(actual.metadata.digest || '') ? { partNumber, etag: actual.metadata.digest } : null;
+          }));
+          for (const receipt of group) { if (!receipt) return json({ completed: false, partSize, count, verified: session.verified || 0, receipts, nextPart: offset + receipts.length, more: false }); receipts.push(receipt); }
+        }
+        return json({ completed: false, partSize, count, verified: session.verified || 0, receipts, nextPart: offset + receipts.length, more: offset + receipts.length < count });
       }
       if (path === '/api/media/part' && request.method === 'PUT') {
         sameOrigin(request); await owner(request);
@@ -184,14 +229,14 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         const count = Math.ceil(session.size / partSize);
         const batched = data.offset !== undefined;
         const offset = batched ? data.offset : 0;
-        if (!Number.isSafeInteger(offset) || offset < 0 || offset >= count || !Array.isArray(data.parts) || data.parts.length < 1 || (batched ? data.parts.length !== Math.min(64, count - offset) : data.parts.length !== count) || data.parts.some((p, i) => !p || p.partNumber !== offset + i + 1 || !/^[a-f0-9]{64}$/.test(p.etag || ''))) fail(400, 'Nedostaju dijelovi datoteke.');
+        if (!Number.isSafeInteger(offset) || offset < 0 || offset >= count || !Array.isArray(data.parts) || data.parts.length < 1 || (batched ? data.parts.length > Math.min(64, count - offset) : data.parts.length !== count) || data.parts.some((p, i) => !p || p.partNumber !== offset + i + 1 || !/^[a-f0-9]{64}$/.test(p.etag || ''))) fail(400, 'Nedostaju dijelovi datoteke.');
         if (await get('media/' + session.file)) return json({ url: '/media/' + session.file });
         const sessionEntry = batched ? await entry(uploadKey(data.id)) : null;
         const verified = sessionEntry?.data.verified || 0;
         if (batched && offset > verified) fail(409, 'Nedostaje prethodni dio provjere. Pokušaj ponovno.');
         if (batched && verified >= offset + data.parts.length && verified < count) return json({ continue: true, nextPart: verified });
-        for (let offset = 0; offset < data.parts.length; offset += 32) {
-          await Promise.all(data.parts.slice(offset, offset + 32).map(async part => {
+        for (let offset = 0; offset < data.parts.length; offset += 4) {
+          await Promise.all(data.parts.slice(offset, offset + 4).map(async part => {
           const actual = await store.getMetadata(partKey(data.id, part.partNumber), { consistency: 'strong' });
           const expected = Math.min(partSize, session.size - (part.partNumber - 1) * partSize);
           if (!actual || actual.metadata.digest !== part.etag || actual.metadata.size !== expected) fail(400, 'Datoteka nije učitana u cijelosti.');
@@ -257,8 +302,8 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
       }
       return json({ error: 'Postupak ne postoji.' }, 404);
     } catch (error) {
-      if (!error.status) console.error('Portfolio storage request failed:', path);
-      return json({ error: error.status ? error.message : 'Spremanje trenutno nije dostupno. Tvoje izmjene ostaju u otvorenoj stranici.' }, error.status || 503);
+      log({ event: 'portfolio-request-error', trace, path, status: error.status || 503, uploadId: /^[a-f0-9-]{36}$/.test(url.searchParams.get('id') || '') ? url.searchParams.get('id') : undefined, part: url.searchParams.get('part'), elapsedMs: now() - startedAt, name: error.name, cause: String(error.message || '').replace(/https?:\/\/[^\s]+/g, '[URL]').replace(/Bearer\s+[^\s]+/gi, '[token]').slice(0, 500) });
+      return json({ error: error.status ? error.message : 'Spremanje trenutno nije dostupno. Tvoje izmjene ostaju u otvorenoj stranici.', trace }, error.status || 503);
     }
   } };
 }
