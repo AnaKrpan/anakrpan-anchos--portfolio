@@ -1,6 +1,6 @@
 const PART_SIZE = 512 * 1024;
 const LEGACY_PART_SIZE = 2 * 1024 * 1024;
-const MAX_SIZE = 512 * 1024 * 1024;
+const MAX_SIZE = 2 * 1024 * 1024 * 1024;
 const COOKIE = '__Host-anchos-owner';
 const SESSION_SECONDS = 8 * 60 * 60;
 const encoder = new TextEncoder();
@@ -157,9 +157,11 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
       if (path === '/api/media/start' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
         const data = await readJSON(request, 4096), ext = TYPES[data.type];
-        if (!ext || !Number.isSafeInteger(data.size) || data.size < 1 || data.size > MAX_SIZE) fail(400, 'Odaberi fotografiju ili video do 512 MB.');
+        if (!ext) fail(400, 'Ovaj format nije podržan. Za video odaberi MP4, MOV, WEBM, M4V ili OGV.');
+        if (!Number.isSafeInteger(data.size) || data.size < 1) fail(400, 'Odabrana datoteka je prazna ili je nije moguće pročitati.');
+        if (data.size > MAX_SIZE) fail(400, 'Video ima ' + Math.ceil(data.size / 1024 / 1024) + ' MB. Dopušteno je do 2 GB po videu.');
         const id = crypto.randomUUID();
-        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, partSize: PART_SIZE, createdAt: now() });
+        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, partSize: PART_SIZE, verified: 0, createdAt: now() });
         return json({ id, partSize: PART_SIZE });
       }
       if (path === '/api/media/part' && request.method === 'PUT') {
@@ -177,16 +179,29 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
       }
       if (path === '/api/media/complete' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
-        const data = await readJSON(request, 262144), session = await uploadSession(data.id);
+        const data = await readJSON(request, 512 * 1024), session = await uploadSession(data.id);
         const partSize = session.partSize || LEGACY_PART_SIZE;
         const count = Math.ceil(session.size / partSize);
-        if (!Array.isArray(data.parts) || data.parts.length !== count || data.parts.some((p, i) => !p || p.partNumber !== i + 1 || !/^[a-f0-9]{64}$/.test(p.etag || ''))) fail(400, 'Nedostaju dijelovi datoteke.');
+        const batched = data.offset !== undefined;
+        const offset = batched ? data.offset : 0;
+        if (!Number.isSafeInteger(offset) || offset < 0 || offset >= count || !Array.isArray(data.parts) || data.parts.length < 1 || (batched ? data.parts.length !== Math.min(64, count - offset) : data.parts.length !== count) || data.parts.some((p, i) => !p || p.partNumber !== offset + i + 1 || !/^[a-f0-9]{64}$/.test(p.etag || ''))) fail(400, 'Nedostaju dijelovi datoteke.');
+        if (await get('media/' + session.file)) return json({ url: '/media/' + session.file });
+        const sessionEntry = batched ? await entry(uploadKey(data.id)) : null;
+        const verified = sessionEntry?.data.verified || 0;
+        if (batched && offset > verified) fail(409, 'Nedostaje prethodni dio provjere. Pokušaj ponovno.');
+        if (batched && verified >= offset + data.parts.length && verified < count) return json({ continue: true, nextPart: verified });
         for (let offset = 0; offset < data.parts.length; offset += 32) {
           await Promise.all(data.parts.slice(offset, offset + 32).map(async part => {
           const actual = await store.getMetadata(partKey(data.id, part.partNumber), { consistency: 'strong' });
           const expected = Math.min(partSize, session.size - (part.partNumber - 1) * partSize);
           if (!actual || actual.metadata.digest !== part.etag || actual.metadata.size !== expected) fail(400, 'Datoteka nije učitana u cijelosti.');
           }));
+        }
+        if (batched && verified < offset + data.parts.length) {
+          const nextPart = offset + data.parts.length;
+          const saved = await store.setJSON(uploadKey(data.id), { ...sessionEntry.data, verified: nextPart }, { onlyIfMatch: sessionEntry.etag });
+          if (!saved.modified) fail(409, 'Provjera je promijenjena. Pokušaj ponovno.');
+          if (nextPart < count) return json({ continue: true, nextPart });
         }
         await store.setJSON('media/' + session.file, { ...session, count }, { onlyIfNew: true });
         return json({ url: '/media/' + session.file });

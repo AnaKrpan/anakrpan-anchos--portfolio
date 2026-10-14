@@ -178,3 +178,51 @@ test('mobile upload queue retries failed chunks and uploads files sequentially',
   const results = await Promise.all([context.transfer(file, 'video/mp4'), context.transfer(file, 'video/mp4')]);
   assert.equal(results.length, 2); assert.equal(created, 2); assert.equal(completed, 2); assert.equal(attempts, 8); assert.equal(maximum, 1);
 });
+
+test('821 MB video is accepted and finalized in small retryable batches without loading video into memory', async () => {
+  const env = setup(); await env.login(); const size = 821 * 1024 * 1024;
+  const start = await env.call('/api/media/start', { method: 'POST', body: { type: 'video/mp4', size } }); assert.equal(start.status, 200);
+  const created = await start.json(), count = Math.ceil(size / created.partSize), digest = 'a'.repeat(64);
+  const parts = [];
+  // Fixture metadata stands in for already persisted binary chunks. Actual binary
+  // storage and byte integrity are exercised in the smaller end-to-end test above.
+  for (let part = 1; part <= count; part++) {
+    const partBytes = Math.min(created.partSize, size - (part - 1) * created.partSize);
+    await env.store.set('parts/' + created.id + '/' + part, new ArrayBuffer(0), { metadata: { digest, size: partBytes } });
+    parts.push({ partNumber: part, etag: digest });
+  }
+  const skipped = await env.call('/api/media/complete', { method: 'POST', body: { id: created.id, offset: 64, parts: parts.slice(64, 128) } }); assert.equal(skipped.status, 409);
+  let url;
+  for (let offset = 0; offset < count; offset += 64) {
+    const body = { id: created.id, offset, parts: parts.slice(offset, offset + 64) };
+    const response = await env.call('/api/media/complete', { method: 'POST', body }); assert.equal(response.status, 200);
+    const result = await response.json();
+    if (offset + 64 < count) { assert.equal(result.nextPart, offset + 64); assert.equal(result.continue, true); assert.equal(await env.store.get('media/' + created.id + '.mp4', { type: 'json' }), null); }
+    else url = result.url;
+    if (offset === 0) { const retry = await env.call('/api/media/complete', { method: 'POST', body }); assert.deepEqual(await retry.json(), result); }
+  }
+  assert.equal(url, '/media/' + created.id + '.mp4');
+  assert.equal((await env.store.get('media/' + created.id + '.mp4', { type: 'json' })).size, size);
+  const overLimit = await env.call('/api/media/start', { method: 'POST', body: { type: 'video/mp4', size: 2 * 1024 * 1024 * 1024 + 1 } }); assert.equal(overLimit.status, 400); assert.match((await overLimit.json()).error, /2 GB/);
+});
+
+test('failed mobile upload can resume by selecting the same file without resending confirmed chunks', async () => {
+  const source = await readFile(new URL('../public/online-script.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('let uploadQueue ='), source.indexOf('async function addPhoto'));
+  let starts = 0, firstParts = 0, failures = 0;
+  const context = vm.createContext({ AbortController, message() {}, setTimeout: (fn, ms) => ms < 45000 ? setTimeout(fn, 0) : 0, clearTimeout() {}, requestJSON: async (path, options) => {
+    if (path.endsWith('/start')) { starts++; return { id: 'resume-id', partSize: 512 * 1024 }; }
+    if (path.includes('/part?')) {
+      const partNumber = Number(path.split('part=')[1]); if (partNumber === 1) firstParts++;
+      if (partNumber === 2 && failures++ < 4) { const error = new Error('Lost connection'); error.status = 503; throw error; }
+      return { partNumber, etag: 'test' };
+    }
+    if (path.endsWith('/complete')) { assert.equal(JSON.parse(options.body).parts.length, 3); return { url: '/media/resumed.mp4' }; }
+    throw new Error('Unexpected request; a failed transfer must not abort and delete stored chunks.');
+  } });
+  vm.runInContext(code + ';globalThis.transfer=uploadFile;', context);
+  const file = new Blob([new Uint8Array(1024 * 1024 + 20)]);
+  await assert.rejects(context.transfer(file, 'video/mp4'), /ponovno odaberi istu datoteku/);
+  assert.equal((await context.transfer(file, 'video/mp4')).url, '/media/resumed.mp4');
+  assert.equal(starts, 1); assert.equal(firstParts, 1);
+});

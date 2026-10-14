@@ -127,7 +127,9 @@ function markDirty() {
   clearTimeout(saveTimer); saveTimer = setTimeout(() => saveChanges(), 1200);
 }
 async function requestJSON(path, options = {}) {
-  const response = await fetch(path, { credentials:'same-origin', ...options });
+  let response;
+  try { response = await fetch(path, { credentials:'same-origin', ...options }); }
+  catch (error) { throw new Error(error.name === 'AbortError' ? 'Veza je prespora ili je prekinuta.' : 'Veza sa stranicom je prekinuta.'); }
   let data; try { data = await response.json(); } catch (_) { throw new Error('Veza sa stranicom nije dostupna. Izmjene su zadržane u ovoj kartici.'); }
   if (!response.ok) { const error = new Error(data.error || 'Spremanje nije uspjelo.'); error.status = response.status; throw error; }
   return data;
@@ -167,6 +169,7 @@ async function saveChanges() {
   return result;
 }
 let uploadQueue = Promise.resolve();
+const unfinishedUploads = new Map();
 async function requestUploadPart(path, options, report) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const controller = new AbortController();
@@ -182,20 +185,32 @@ async function requestUploadPart(path, options, report) {
 }
 function uploadFile(file, type, report = message) {
   const transfer = async () => {
-    report('Počinjem učitavanje…');
-    const created = await requestJSON('/api/media/start', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,size:file.size})});
+    const fileKey = [file.name || '',file.size,file.lastModified || 0,type].join(':');
+    let state = unfinishedUploads.get(fileKey);
+    if (!state) {
+      report('Počinjem učitavanje…');
+      const created = await requestJSON('/api/media/start', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,size:file.size})});
+      state = {created,parts:[],verified:0}; unfinishedUploads.set(fileKey,state);
+    }
+    const created = state.created;
     try {
-      const parts = [], partSize = created.partSize || 512*1024;
-      for (let offset = 0, part = 1; offset < file.size; offset += partSize, part++) {
+      const parts = state.parts, partSize = created.partSize || 512*1024;
+      for (let offset = parts.length*partSize, part = parts.length+1; offset < file.size; offset += partSize, part++) {
         const result = await requestUploadPart('/api/media/part?id='+encodeURIComponent(created.id)+'&part='+part, {method:'PUT',headers:{'content-type':'application/octet-stream'},body:file.slice(offset,offset+partSize)}, report);
         parts.push(result);
         report('Učitano: ' + Math.round(Math.min(offset+partSize,file.size)/file.size*100) + ' %');
       }
-      report('Provjeravam i spremam cijelu datoteku…');
-      return await requestUploadPart('/api/media/complete', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id,parts})}, report);
+      for (let offset = state.verified; offset < parts.length;) {
+        report('Video je prenesen. Provjeravam spremanje: ' + Math.round(offset/parts.length*100) + ' %…');
+        const result = await requestUploadPart('/api/media/complete', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id,offset,parts:parts.slice(offset,offset+64)})}, report);
+        if (result.url) { unfinishedUploads.delete(fileKey); return result; }
+        if (!result.continue || !Number.isInteger(result.nextPart) || result.nextPart <= offset || result.nextPart >= parts.length) throw new Error('Provjera datoteke nije završena. Pokušaj ponovno.');
+        offset = result.nextPart; state.verified = offset;
+      }
+      throw new Error('Spremanje videa nije završeno.');
     } catch (error) {
-      requestJSON('/api/media/abort',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id})}).catch(() => {});
-      throw error;
+      if ([404,410].includes(error.status)) unfinishedUploads.delete(fileKey);
+      throw new Error(error.message + ' Ostavi ovu karticu otvorenu i ponovno odaberi istu datoteku da nastaviš učitavanje.');
     }
   };
   report('Datoteka čeka svoj red za učitavanje…');
