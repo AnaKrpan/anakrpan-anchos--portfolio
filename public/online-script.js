@@ -136,7 +136,6 @@ function setSaveButton() { exportButton.disabled = !!saving || publishing || pen
 async function saveChanges() {
   if (saving) return saving;
   if (!canEdit) return;
-  if (pendingFiles) return false;
   if (!dirty) { if (!pendingFiles) message('Sve izmjene su već spremljene na istoj adresi.'); return; }
   const savedSerial = serial;
   const snapshot = captureDraft();
@@ -167,20 +166,42 @@ async function saveChanges() {
   if (result && dirty) { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveChanges(),300); }
   return result;
 }
-async function uploadFile(file, type) {
-  const created = await requestJSON('/api/media/start', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,size:file.size})});
-  try {
-    const parts = [], partSize = created.partSize || 2*1024*1024;
-    for (let offset = 0, part = 1; offset < file.size; offset += partSize, part++) {
-      message('Spremam datoteku: ' + Math.round(offset/file.size*100) + ' %…');
-      const result = await requestJSON('/api/media/part?id='+encodeURIComponent(created.id)+'&part='+part, {method:'PUT',headers:{'content-type':'application/octet-stream'},body:file.slice(offset,offset+partSize)});
-      parts.push(result);
-    }
-    return await requestJSON('/api/media/complete', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id,parts})});
-  } catch (error) {
-    requestJSON('/api/media/abort',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id})}).catch(() => {});
-    throw error;
+let uploadQueue = Promise.resolve();
+async function requestUploadPart(path, options, report) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000);
+    try { return await requestJSON(path, {...options, signal:controller.signal}); }
+    catch (error) {
+      const retryable = !error.status || [408,429,500,502,503,504].includes(error.status);
+      if (!retryable || attempt === 3) throw error;
+      report('Veza je zapela. Ponavljam ovaj dio videa…');
+      await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+    } finally { clearTimeout(timeout); }
   }
+}
+function uploadFile(file, type, report = message) {
+  const transfer = async () => {
+    report('Počinjem učitavanje…');
+    const created = await requestJSON('/api/media/start', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,size:file.size})});
+    try {
+      const parts = [], partSize = created.partSize || 512*1024;
+      for (let offset = 0, part = 1; offset < file.size; offset += partSize, part++) {
+        const result = await requestUploadPart('/api/media/part?id='+encodeURIComponent(created.id)+'&part='+part, {method:'PUT',headers:{'content-type':'application/octet-stream'},body:file.slice(offset,offset+partSize)}, report);
+        parts.push(result);
+        report('Učitano: ' + Math.round(Math.min(offset+partSize,file.size)/file.size*100) + ' %');
+      }
+      report('Provjeravam i spremam cijelu datoteku…');
+      return await requestUploadPart('/api/media/complete', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id,parts})}, report);
+    } catch (error) {
+      requestJSON('/api/media/abort',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id})}).catch(() => {});
+      throw error;
+    }
+  };
+  report('Datoteka čeka svoj red za učitavanje…');
+  const task = uploadQueue.then(transfer);
+  uploadQueue = task.catch(() => {});
+  return task;
 }
 async function addPhoto(file,target) {
   if (!file || !target) return;
@@ -196,6 +217,8 @@ async function addPhoto(file,target) {
 }
 document.querySelectorAll('[data-video-slot]').forEach(card => {
   const video = card.querySelector('video'), slot = card.dataset.videoSlot;
+  const progress = document.createElement('p'); progress.setAttribute('role','status'); progress.setAttribute('aria-live','polite'); progress.style.cssText='margin:5px 0;font-size:13px;overflow-wrap:anywhere'; card.querySelector('.video-edit-tools').append(progress);
+  const report = text => { progress.textContent = text; message(text); };
   card.querySelector('.video-input').addEventListener('change',async event => {
     const file = event.target.files[0]; event.target.value=''; if (!file) return;
     if (!PortfolioFiles.acceptsVideo(file)) { message('Odaberi video datoteku.'); return; }
@@ -204,11 +227,11 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
     try {
       const byExt={mp4:'video/mp4',mov:'video/quicktime',webm:'video/webm',m4v:'video/x-m4v',ogv:'video/ogg'};
       const type=byExt[(file.name.split('.').pop()||'').toLowerCase()] || file.type;
-      const result=await uploadFile(file,type);
+      const result=await uploadFile(file,type,report);
       if (videoEpochs.get(slot)!==epoch) return;
       video.pause(); video.src=result.url; video.hidden=false; video.load(); card.querySelector('.video-placeholder').hidden=true;
-      card.dataset.mediaName=file.name; markDirty(); await saveChanges();
-    } catch (error) { message(error.message+' Prethodni video i ostale izmjene su zadržani.'); }
+      card.dataset.mediaName=file.name; markDirty(); await saveChanges(); progress.textContent='Video je učitan. Klikni „Spremi i objavi” za javnu objavu.';
+    } catch (error) { report(error.message+' Prethodni video i ostale izmjene su zadržani.'); }
     finally { pendingFiles--; setSaveButton(); if (dirty && !pendingFiles) saveChanges(); }
   });
   card.querySelector('.remove-video').addEventListener('click',() => {

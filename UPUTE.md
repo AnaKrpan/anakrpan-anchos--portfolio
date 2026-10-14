@@ -15,7 +15,7 @@ Portfolio s javnom objavom i privatnim uređivanjem, pripremljen za Netlify.
 - Otvori svoj javni portfolio i na dnu klikni „Prijava za uređivanje”.
 - Upiši svoju lozinku. Prijava vrijedi osam sati.
 - Klikni tekst za promjenu, fotografiju za zamjenu ili „Dodaj ili zamijeni video”.
-- Pričekaj da datoteka bude učitana. Video se prenosi u dijelovima od 2 MB, bez ugrađivanja u HTML. Podržana su videa do 512 MB; za reprodukciju na različitim mobitelima koristi MP4 s H.264 videom i AAC zvukom.
+- Pričekaj da datoteka bude učitana. Pri kratkom prekidu veze dio se pokušava prenijeti ponovno, a datoteke čekaju svoj red. Video se prenosi u dijelovima od 512 KB, bez ugrađivanja u HTML. Podržana su videa do 512 MB; za reprodukciju na različitim mobitelima koristi MP4 s H.264 videom i AAC zvukom.
 - Nacrt se sprema privatno na Netlify, s provjerom sukoba ako je otvoreno više kartica.
 - Klikni „Spremi i objavi”. Tek tada posjetitelji na istom javnom linku vide novi sadržaj.
 - „Pogledaj objavljeni portfolio” otvara javnu verziju. „Odjavi se” zaključava uređivanje na tvom uređaju.

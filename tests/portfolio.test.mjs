@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPortfolio } from '../netlify/edge-functions/lib/server.js';
 import initialDocument from '../netlify/edge-functions/lib/initial-document.js';
+import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
 
 class MemoryStore {
   values = new Map(); sequence = 0; hook = null;
@@ -136,4 +138,36 @@ test('owner setup fails closed and repeated wrong passwords are throttled', asyn
   const env = setup();
   for (let attempt = 0; attempt < 10; attempt++) assert.equal((await env.call('/api/login', { method: 'POST', body: { password: 'wrong' } })).status, 401);
   assert.equal((await env.call('/api/login', { method: 'POST', body: { password } })).status, 429);
+});
+
+test('previously uploaded videos using 2 MB chunks still play after reducing upload chunk size', async () => {
+  const env = setup(), id = crypto.randomUUID(), file = id + '.mp4', partSize = 2 * 1024 * 1024;
+  const bytes = Uint8Array.from({ length: partSize + 100 }, (_, i) => i % 253);
+  await env.store.set('parts/' + id + '/1', bytes.slice(0, partSize).buffer);
+  await env.store.set('parts/' + id + '/2', bytes.slice(partSize).buffer);
+  await env.store.setJSON('media/' + file, { id, size: bytes.length, type: 'video/mp4', count: 2 });
+  const saved = doc(); saved.videos[0].src = '/media/' + file; saved.videos[0].present = true;
+  await env.store.setJSON('state', { draft: null, published: { document: saved, revision: 1 } });
+  const response = await env.call('/media/' + file, { auth: false, headers: { range: 'bytes=2097140-2097170' } });
+  assert.equal(response.status, 206); assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes.slice(2097140, 2097171));
+});
+
+test('mobile upload queue retries failed chunks and uploads files sequentially', async () => {
+  const source = await readFile(new URL('../public/online-script.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('let uploadQueue ='), source.indexOf('async function addPhoto'));
+  let attempts = 0, active = 0, maximum = 0, completed = 0, created = 0;
+  const context = vm.createContext({ AbortController, message() {}, setTimeout: (fn, ms) => ms < 45000 ? setTimeout(fn, 0) : 0, clearTimeout() {}, requestJSON: async (path, options) => {
+    active++; maximum = Math.max(maximum, active);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1));
+      if (path.endsWith('/start')) return { id: 'upload-' + ++created, partSize: 512 * 1024 };
+      if (path.includes('/part?')) { attempts++; if (attempts <= 2) { const error = new Error('Temporary network failure'); error.status = 503; throw error; } return { partNumber: Number(path.split('part=')[1]), etag: 'test' }; }
+      if (path.endsWith('/complete')) { const data = JSON.parse(options.body); assert.equal(data.parts.length, 3); return { url: '/media/file-' + ++completed }; }
+      throw new Error('Unexpected request');
+    } finally { active--; }
+  } });
+  vm.runInContext(code + ';globalThis.transfer=uploadFile;', context);
+  const file = new Blob([new Uint8Array(1024 * 1024 + 20)]);
+  const results = await Promise.all([context.transfer(file, 'video/mp4'), context.transfer(file, 'video/mp4')]);
+  assert.equal(results.length, 2); assert.equal(created, 2); assert.equal(completed, 2); assert.equal(attempts, 8); assert.equal(maximum, 1);
 });

@@ -1,4 +1,5 @@
-const PART_SIZE = 2 * 1024 * 1024;
+const PART_SIZE = 512 * 1024;
+const LEGACY_PART_SIZE = 2 * 1024 * 1024;
 const MAX_SIZE = 512 * 1024 * 1024;
 const COOKIE = '__Host-anchos-owner';
 const SESSION_SECONDS = 8 * 60 * 60;
@@ -158,16 +159,17 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         const data = await readJSON(request, 4096), ext = TYPES[data.type];
         if (!ext || !Number.isSafeInteger(data.size) || data.size < 1 || data.size > MAX_SIZE) fail(400, 'Odaberi fotografiju ili video do 512 MB.');
         const id = crypto.randomUUID();
-        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, createdAt: now() });
+        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, partSize: PART_SIZE, createdAt: now() });
         return json({ id, partSize: PART_SIZE });
       }
       if (path === '/api/media/part' && request.method === 'PUT') {
         sameOrigin(request); await owner(request);
         const id = url.searchParams.get('id'), session = await uploadSession(id), part = Number(url.searchParams.get('part'));
-        const count = Math.ceil(session.size / PART_SIZE);
+        const partSize = session.partSize || LEGACY_PART_SIZE;
+        const count = Math.ceil(session.size / partSize);
         if (!Number.isInteger(part) || part < 1 || part > count) fail(400, 'Neispravan dio datoteke.');
         if (await get('media/' + session.file)) fail(409, 'Datoteka je već završena.');
-        const bytes = await limitedBody(request, PART_SIZE), expected = Math.min(PART_SIZE, session.size - (part - 1) * PART_SIZE);
+        const bytes = await limitedBody(request, partSize), expected = Math.min(partSize, session.size - (part - 1) * partSize);
         if (bytes.length !== expected) fail(400, 'Dio datoteke nije učitan u cijelosti.');
         const etag = await hash(bytes);
         await store.set(partKey(id, part), bytes.buffer, { metadata: { size: bytes.length, digest: etag } });
@@ -175,13 +177,14 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
       }
       if (path === '/api/media/complete' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
-        const data = await readJSON(request, 65536), session = await uploadSession(data.id);
-        const count = Math.ceil(session.size / PART_SIZE);
+        const data = await readJSON(request, 262144), session = await uploadSession(data.id);
+        const partSize = session.partSize || LEGACY_PART_SIZE;
+        const count = Math.ceil(session.size / partSize);
         if (!Array.isArray(data.parts) || data.parts.length !== count || data.parts.some((p, i) => !p || p.partNumber !== i + 1 || !/^[a-f0-9]{64}$/.test(p.etag || ''))) fail(400, 'Nedostaju dijelovi datoteke.');
-        for (let offset = 0; offset < data.parts.length; offset += 8) {
-          await Promise.all(data.parts.slice(offset, offset + 8).map(async part => {
+        for (let offset = 0; offset < data.parts.length; offset += 32) {
+          await Promise.all(data.parts.slice(offset, offset + 32).map(async part => {
           const actual = await store.getMetadata(partKey(data.id, part.partNumber), { consistency: 'strong' });
-          const expected = Math.min(PART_SIZE, session.size - (part.partNumber - 1) * PART_SIZE);
+          const expected = Math.min(partSize, session.size - (part.partNumber - 1) * partSize);
           if (!actual || actual.metadata.digest !== part.etag || actual.metadata.size !== expected) fail(400, 'Datoteka nije učitana u cijelosti.');
           }));
         }
@@ -192,7 +195,7 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         sameOrigin(request); await owner(request);
         const data = await readJSON(request, 4096), session = await uploadSession(data.id);
         if (await get('media/' + session.file)) fail(409, 'Spremljenu datoteku nije moguće izbrisati ovim postupkom.');
-        for (let part = 1; part <= Math.ceil(session.size / PART_SIZE); part++) await store.delete(partKey(data.id, part));
+        for (let part = 1; part <= Math.ceil(session.size / (session.partSize || LEGACY_PART_SIZE)); part++) await store.delete(partKey(data.id, part));
         await store.delete(uploadKey(data.id));
         return json({ aborted: true });
       }
@@ -203,6 +206,7 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         if (!visible) await owner(request);
         const manifest = await get('media/' + path.slice(7));
         if (!manifest) fail(404, 'Datoteka ne postoji.');
+        const partSize = manifest.partSize || LEGACY_PART_SIZE;
         const headers = new Headers({ 'content-type': manifest.type, 'accept-ranges': 'bytes', 'cache-control': 'private,no-store', 'x-content-type-options': 'nosniff' });
         let start = 0, end = manifest.size - 1, status = 200;
         const range = request.method === 'GET' && request.headers.get('range');
@@ -213,7 +217,7 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
           else { start = Number(match[1]); if (match[2]) end = Math.min(end, Number(match[2])); }
           if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= manifest.size) return json({ error: 'Neispravan raspon.' }, 416, { 'content-range': 'bytes */' + manifest.size });
           // Bounded ranges let mobile players seek without downloading the entire video.
-          end = Math.min(end, start + PART_SIZE - 1); status = 206;
+          end = Math.min(end, start + partSize - 1); status = 206;
           headers.set('content-range', `bytes ${start}-${end}/${manifest.size}`);
         }
         headers.set('content-length', String(end - start + 1));
@@ -223,10 +227,10 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
           async pull(controller) {
             try {
               if (offset > end) { controller.close(); return; }
-              const part = Math.floor(offset / PART_SIZE) + 1;
+              const part = Math.floor(offset / partSize) + 1;
               const buffer = await get(partKey(manifest.id, part), 'arrayBuffer');
               if (!buffer) throw new Error('Nedostaje dio datoteke.');
-              const bytes = new Uint8Array(buffer), within = offset % PART_SIZE, length = Math.min(bytes.length - within, end - offset + 1);
+              const bytes = new Uint8Array(buffer), within = offset % partSize, length = Math.min(bytes.length - within, end - offset + 1);
               if (length < 1) throw new Error('Neispravna datoteka.');
               controller.enqueue(bytes.subarray(within, within + length)); offset += length;
               if (offset > end) controller.close();
