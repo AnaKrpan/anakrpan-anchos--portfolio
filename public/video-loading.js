@@ -17,6 +17,7 @@
       set(src,poster='',force=false){
         if(source===src&&src&&!force)return;
         video.pause();video.removeAttribute('src');video.preload='none';video.load();
+        try{video.currentTime=0;}catch{}
         source=src||'';video.dataset.mediaSrc=source;video.controls=false;
         if(poster)video.poster=poster;else video.removeAttribute('poster');
         video.hidden=!source;button.hidden=!source;
