@@ -6,7 +6,7 @@ test('installed Netlify SDK honors actual conditional request headers and closes
   const objects=new Map(), requests=[]; let serial=0,cancelled=0;
   const discardedResponse=(status,headers={})=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('unused response'));},cancel(){cancelled++;}}),{status,headers});
   const transport=async (input,options={})=>{
-    const url=new URL(input), headers=new Headers(options.headers), method=options.method||'GET';
+    const url=new URL(input), headers=new Headers(options.headers), method=(options.method||'GET').toUpperCase();
     const key=decodeURIComponent(url.pathname.split('/').at(-1));
     requests.push({key,method,ifMatch:headers.get('if-match'),ifNone:headers.get('if-none-match'),signing:headers.get('accept')?.includes('type=signed-url')||false});
     if(headers.get('accept')?.includes('type=signed-url'))return Response.json({url:'https://objects.invalid/object/'+encodeURIComponent(key)});
