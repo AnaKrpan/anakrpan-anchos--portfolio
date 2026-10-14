@@ -1,0 +1,52 @@
+{
+  "/media/33f0e71d-f955-4d52-b154-dd6ed2a07090.mp4": {
+    "url": "/viewing-videos/33f0e71d-f955-4d52-b154-dd6ed2a07090.mp4",
+    "originalSize": 820728899,
+    "originalSHA256": "16b40636f8624103529afe6f27fb9919dc7194e234a48455659d03ce91f6e4f4",
+    "size": 21045286,
+    "sha256": "c4b5cbe887d35823862c8c2ed80ee62b191b6c12ebfff496f40f300cd29a509e",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "/media/b044c36d-62ae-4771-a9ef-3a294ad4a923.mp4": {
+    "url": "/viewing-videos/b044c36d-62ae-4771-a9ef-3a294ad4a923.mp4",
+    "originalSize": 135400217,
+    "originalSHA256": "88c303a242ff95d2a78851ae798e3944cf17a9a1265d50223fbf0a7a444c93be",
+    "size": 19821529,
+    "sha256": "d208c58e9f95d9eff75d1dff37dd9dd42725a973ea363f982d3d991552d49d33",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "/media/bf80cc54-077f-4878-be58-36d292b58916.mp4": {
+    "url": "/viewing-videos/bf80cc54-077f-4878-be58-36d292b58916.mp4",
+    "originalSize": 1589120394,
+    "originalSHA256": "2a2b61bc7967f0b598b2772112f1232ffd35c530c82649a8e739469aaf661e62",
+    "size": 38757097,
+    "sha256": "777e4321c4aac4b98e1564120dafd989fbbcd874e3b06263671297396dc60158",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "/media/14592b90-e095-40f9-a4d4-db27d8313b27.mp4": {
+    "url": "/viewing-videos/14592b90-e095-40f9-a4d4-db27d8313b27.mp4",
+    "originalSize": 199991129,
+    "originalSHA256": "b3138152860505d27232759f326fbc618879616ebc2440bb7b591cc6d91452a8",
+    "size": 30237921,
+    "sha256": "2217b379f5fe4d7d2eeee7fb8df25ed3df5568a3414a52ed78af5a208d20b3d0",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "/media/4ee0abc1-3fc0-42e4-aab4-b1485c362f8a.mp4": {
+    "url": "/viewing-videos/4ee0abc1-3fc0-42e4-aab4-b1485c362f8a.mp4",
+    "originalSize": 142041628,
+    "originalSHA256": "59ab4aa0547c57c23ff14cd2ddab5bc6a215ef4c3e7684ff3d9c9c5a9f7519d4",
+    "size": 21177350,
+    "sha256": "f1631415d6ca2cae38dcd606d4888e0a567248b44f1575b1546b152c955ea165",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  }
+}
