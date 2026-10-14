@@ -39,14 +39,14 @@
     const digest = await root.crypto.subtle.digest('SHA-256', bytes);
     return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
   }
-  function createUploader({ request, storage: progressStorage = storage, report: defaultReport = () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), attempts = 4 }) {
+  function createUploader({ request, directRequest = (...args) => root.fetch(...args), storage: progressStorage = storage, report: defaultReport = () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), attempts = 4 }) {
     let queue = Promise.resolve();
     const interrupted = new Set();
-    async function reliable(path, options, report, stage) {
+    async function reliable(path, options, report, stage, send = request, timeoutMs = 35000) {
       for (let attempt = 0; attempt < attempts; attempt++) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 35000);
-        try { return await request(path, { ...options, signal: controller.signal }); }
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try { return await send(path, { ...options, signal: controller.signal }); }
         catch (error) {
           if (error.status && ![408,429,500,502,503,504].includes(error.status) || attempt === attempts - 1) {
             error.stage = stage;
@@ -67,6 +67,43 @@
         const persist = async state => { try { await progressStorage.set(key, state); } catch (_) {} };
         try {
           const created = await reliable('/api/media/start', { method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,size:file.size,fingerprint:key}) }, report, 'Početak prijenosa');
+          if (created.direct) {
+            const partSize=created.partSize;
+            if (!Number.isInteger(partSize) || partSize < 5*1024*1024 || partSize > 16*1024*1024) throw new Error('Neispravna veličina dijela originala.');
+            const status=await reliable('/api/media/status?id='+encodeURIComponent(created.id),{},report,'Provjera izvornog prijenosa');
+            if (status.completed && status.url) { await progressStorage.remove(key).catch(()=>{}); interrupted.delete(key); return {url:status.url}; }
+            const receipts=new Map((status.receipts || []).map(p=>[p.partNumber,p]));
+            const state={created,parts:[...receipts.values()]};
+            let sent=0;
+            for (let offset=0,part=1;offset<file.size;offset+=partSize,part++) {
+              const blob=file.slice(offset,offset+partSize), size=blob.size;
+              const digest=new Uint8Array(await root.crypto.subtle.digest('SHA-256',await blob.arrayBuffer()));
+              const checksum=root.btoa(String.fromCharCode(...digest));
+              const saved=receipts.get(part);
+              // Server receipts are authoritative; do not resend confirmed parts.
+              if (saved?.size !== size || saved?.checksum !== checksum) {
+                const sendPart=async (_path,options)=> {
+                  const signed=await request('/api/media/part-url',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id,part,checksum}),signal:options.signal});
+                  const target=new URL(signed.url);
+                  if (target.protocol !== 'https:' || !/^[a-f0-9]{32}\.r2\.cloudflarestorage\.com$/.test(target.hostname) || signed.headers?.['x-amz-checksum-sha256'] !== checksum) throw new Error('Odredište originala nije potvrđeno.');
+                  const response=await directRequest(signed.url,{method:'PUT',headers:signed.headers,body:blob,signal:options.signal,credentials:'omit',redirect:'error'});
+                  if (!response.ok) { await response.body?.cancel(); throw Object.assign(new Error('Prijenos originala nije potvrđen ('+response.status+').'),{status:response.status}); }
+                  const etag=response.headers.get('etag');
+                  await response.body?.cancel();
+                  if (!etag) throw new Error('Pohrana nije vratila potvrdu dijela.');
+                  return {partNumber:part,size,checksum,etag};
+                };
+                const receipt=await reliable('',{},report,'Izravni prijenos originala',sendPart,180000);
+                receipts.set(part,receipt);
+              }
+              sent+=size;
+              state.parts=[...receipts.values()]; await persist(state);
+              report('Preneseno: '+Math.floor(sent/file.size*100)+' %. Izvorna kvaliteta je zadržana.');
+            }
+            const result=await reliable('/api/media/complete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id})},report,'Provjera spremljenog originala');
+            if (!result.url) throw new Error('Nedostaje potvrda spremljenog originala.');
+            await progressStorage.remove(key).catch(()=>{}); interrupted.delete(key); return result;
+          }
           let saved; try { saved = await progressStorage.get(key); } catch (_) {}
           const state = saved?.created?.id === created.id && Array.isArray(saved.parts) ? saved : { created, parts:[], verified:0 };
           state.created = created;

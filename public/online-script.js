@@ -253,6 +253,11 @@ const draftReady = (async () => {
     document.querySelector('#owner-signin').hidden=canEdit;
     globalNotice.hidden=true; setSaveButton();
     if(canEdit && location.pathname==='/uredi')setEditing(true);
+    if(canEdit && location.pathname==='/uredi' && session.migrationNeeded) {
+      // Migration only starts after the operator explicitly enables the verified
+      // storage connection. It preserves both published and draft documents.
+      requestJSON('/api/originals/migrate',{method:'POST'}).then(()=>message('Postojeći originali prenose se u novu pohranu. Možeš nastaviti uređivati; sadržaj ostaje sačuvan.')).catch(()=>message('Prijenos postojećih originala još nije pokrenut. Prethodni videi i sve izmjene su zadržani.'));
+    }
   } catch(error) {
     globalNotice.hidden=false;globalNotice.textContent='Spremljeni portfolio nije moguće učitati: '+error.message+' Osvježi stranicu i pokušaj ponovno.';
   }

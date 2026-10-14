@@ -1,3 +1,4 @@
+import { ORIGINAL_PART_SIZE } from './original-storage.js';
 const PART_SIZE = 512 * 1024;
 const LEGACY_PART_SIZE = 2 * 1024 * 1024;
 const MAX_SIZE = 2 * 1024 * 1024 * 1024;
@@ -58,7 +59,7 @@ function uploadKey(id) {
   return 'uploads/' + id;
 }
 const partKey = (id, part) => 'parts/' + id + '/' + part;
-export function createPortfolio({ store, password, initialDocument, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
+export function createPortfolio({ store, password, initialDocument, originals = null, migrationEnabled = false, dispatch = globalThis.fetch, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
   const get = (key, type = 'json') => store.get(key, { type, consistency: 'strong' });
   const entry = (key, type = 'json') => store.getWithMetadata(key, { type, consistency: 'strong' });
   const emptyState = () => ({ draft: null, published: null });
@@ -135,7 +136,23 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         sameOrigin(request);
         return json({ signedOut: true }, 200, { 'set-cookie': COOKIE + '=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0' });
       }
-      if (path === '/api/session' && request.method === 'GET') return json({ canEdit: await authorized(request) });
+      if (path === '/api/session' && request.method === 'GET') {
+        const canEdit=await authorized(request);
+        if (!canEdit || !originals || !migrationEnabled) return json({canEdit});
+        const state=await get('state');
+        const files=[...new Set([...(state?.draft?.document?.videos || []),...(state?.published?.document?.videos || [])].map(v=>v.src).filter(src=>src.startsWith('/media/')))];
+        const manifests=await Promise.all(files.map(src=>get('media/'+src.slice(7))));
+        return json({canEdit,migrationNeeded:manifests.some(m=>m?.type?.startsWith('video/') && m.backend!=='r2')});
+      }
+      if (path === '/api/originals/migrate' && request.method === 'POST') {
+        sameOrigin(request); await owner(request);
+        if (!originals || !migrationEnabled) fail(503,'Prijenos postojećih originala još nije aktiviran.');
+        const body=JSON.stringify({expires:now()+300000,nonce:crypto.randomUUID()});
+        const response=await dispatch(url.origin+'/.netlify/functions/migrate-originals-background',{method:'POST',headers:{'content-type':'application/json','x-anchos-signature':await signed('original-migration:'+body)},body,signal:AbortSignal.timeout(10000),redirect:'error'});
+        await response.body?.cancel();
+        if (response.status!==202) fail(503,'Prijenos originala nije pokrenut. Sadržaj je zadržan.');
+        return json({started:true,originalsRetained:true});
+      }
       if (path === '/api/content' && request.method === 'GET') {
         const state = await get('state');
         return json(state?.published || { document: initialDocument, revision: 0 });
@@ -176,18 +193,22 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
           if (existing) {
             const session = await get(uploadKey(existing.id));
             if (session && now() - session.createdAt <= UPLOAD_TTL && session.size === data.size && session.type === data.type) {
-              return json({ id: session.id, partSize: session.partSize || LEGACY_PART_SIZE, verifyBatch: 8, resumed: true });
+              return json({ id: session.id, partSize: session.partSize || LEGACY_PART_SIZE, verifyBatch: 8, resumed: true, direct: session.backend === 'r2' });
             }
           }
         }
         const id = crypto.randomUUID();
-        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, partSize: PART_SIZE, verified: 0, createdAt: now(), fingerprint: fingerprint || '' });
+        const direct = !!originals && data.type.startsWith('video/');
+        const objectKey = direct ? 'originals/' + id + '.' + ext : undefined;
+        const uploadId = direct ? await originals.start(objectKey,data.type) : undefined;
+        const partSize = direct ? ORIGINAL_PART_SIZE : PART_SIZE;
+        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, partSize, verified: 0, createdAt: now(), fingerprint: fingerprint || '', ...(direct ? {backend:'r2',objectKey,uploadId}: {}) });
         if (fingerprint) {
           const key = 'upload-index/' + fingerprint, old = await entry(key);
           const saved = await store.setJSON(key, { id }, old ? { onlyIfMatch: old.etag } : { onlyIfNew: true });
           if (!saved.modified) fail(409, 'Ista datoteka se učitava u drugoj kartici. Pokušaj ponovno.');
         }
-        return json({ id, partSize: PART_SIZE, verifyBatch: 8, resumed: false });
+        return json({ id, partSize, verifyBatch: 8, resumed: false, direct });
       }
       if (path === '/api/media/status' && request.method === 'GET') {
         await owner(request);
@@ -195,6 +216,16 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         const partSize = session.partSize || LEGACY_PART_SIZE, count = Math.ceil(session.size / partSize);
         const completed = await get('media/' + session.file);
         if (completed) return json({ completed: true, url: '/media/' + session.file, partSize, count, verified: count });
+        if (session.backend === 'r2') {
+          if (!originals) fail(503,'Pohrana originala nije povezana.');
+          const head = await originals.head(session.objectKey);
+          if (head && head.size === session.size && head.type === session.type) {
+            await store.setJSON('media/' + session.file,{...session,count},{onlyIfNew:true});
+            return json({completed:true,url:'/media/'+session.file,partSize,count,verified:count});
+          }
+          const parts = await originals.list(session.objectKey,session.uploadId);
+          return json({completed:false,direct:true,partSize,count,receipts:parts,more:false});
+        }
         const offset = Number(url.searchParams.get('offset') || 0);
         if (!Number.isInteger(offset) || offset < 0 || offset >= count) fail(400, 'Neispravan nastavak prijenosa.');
         const receipts = [];
@@ -214,6 +245,7 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         const id = url.searchParams.get('id'), session = await uploadSession(id), part = Number(url.searchParams.get('part'));
         const partSize = session.partSize || LEGACY_PART_SIZE;
         const count = Math.ceil(session.size / partSize);
+        if (session.backend === 'r2') fail(400,'Original se prenosi izravno u pohranu.');
         if (!Number.isInteger(part) || part < 1 || part > count) fail(400, 'Neispravan dio datoteke.');
         if (await get('media/' + session.file)) fail(409, 'Datoteka je već završena.');
         const bytes = await limitedBody(request, partSize), expected = Math.min(partSize, session.size - (part - 1) * partSize);
@@ -222,9 +254,32 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         await store.set(partKey(id, part), bytes.buffer, { metadata: { size: bytes.length, digest: etag } });
         return json({ partNumber: part, etag });
       }
+      if (path === '/api/media/part-url' && request.method === 'POST') {
+        sameOrigin(request); await owner(request);
+        const data = await readJSON(request,4096), session = await uploadSession(data.id);
+        if (session.backend !== 'r2' || !originals) fail(400,'Izravni prijenos nije aktiviran.');
+        if (!Number.isInteger(data.part) || data.part < 1 || data.part > Math.ceil(session.size/session.partSize)) fail(400,'Neispravan dio originala.');
+        if (await get('media/' + session.file)) fail(409,'Datoteka je već završena.');
+        return json(await originals.partURL(session.objectKey,session.uploadId,data.part,data.checksum));
+      }
       if (path === '/api/media/complete' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
         const data = await readJSON(request, 512 * 1024), session = await uploadSession(data.id);
+        if (session.backend === 'r2') {
+          if (!originals) fail(503,'Pohrana originala nije povezana.');
+          if (await get('media/' + session.file)) return json({url:'/media/'+session.file});
+          let head = await originals.head(session.objectKey);
+          const count = Math.ceil(session.size/session.partSize);
+          if (!head) {
+            const parts = await originals.list(session.objectKey,session.uploadId);
+            if (parts.length !== count || parts.some((p,i)=>p.partNumber !== i+1 || p.size !== Math.min(session.partSize,session.size-i*session.partSize))) fail(400,'Original nije prenesen u cijelosti.');
+            await originals.complete(session.objectKey,session.uploadId,parts);
+            head = await originals.head(session.objectKey);
+          }
+          if (!head || head.size !== session.size || head.type !== session.type) fail(400,'Spremljeni original nije potvrđen.');
+          await store.setJSON('media/'+session.file,{...session,count,originalBytesPreserved:true},{onlyIfNew:true});
+          return json({url:'/media/'+session.file});
+        }
         const partSize = session.partSize || LEGACY_PART_SIZE;
         const count = Math.ceil(session.size / partSize);
         const batched = data.offset !== undefined;
@@ -254,6 +309,7 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
       if (path === '/api/media/abort' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
         const data = await readJSON(request, 4096), session = await uploadSession(data.id);
+        if (session.backend === 'r2') fail(409,'Izvorni dijelovi zadržani su za nastavak prijenosa.');
         if (await get('media/' + session.file)) fail(409, 'Spremljenu datoteku nije moguće izbrisati ovim postupkom.');
         for (let part = 1; part <= Math.ceil(session.size / (session.partSize || LEGACY_PART_SIZE)); part++) await store.delete(partKey(data.id, part));
         await store.delete(uploadKey(data.id));
@@ -266,7 +322,13 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
         if (!visible) await owner(request);
         const manifest = await get('media/' + path.slice(7));
         if (!manifest) fail(404, 'Datoteka ne postoji.');
-        const partSize = manifest.partSize || LEGACY_PART_SIZE;
+        if (manifest.backend === 'r2' && originals) {
+          return new Response(null,{status:307,headers:{location:await originals.signedURL(manifest.objectKey,request.method), 'cache-control':'no-store','referrer-policy':'no-referrer'}});
+        }
+        if (manifest.backend === 'r2' && !manifest.legacy) fail(503,'Izravna pohrana originala nije povezana.');
+        // Migrated originals retain the old chunk manifest for emergency fallback.
+        const storedManifest = manifest.backend === 'r2' ? manifest.legacy : manifest;
+        const partSize = storedManifest.partSize || LEGACY_PART_SIZE;
         const headers = new Headers({ 'content-type': manifest.type, 'accept-ranges': 'bytes', 'cache-control': 'private,no-store', 'x-content-type-options': 'nosniff' });
         let start = 0, end = manifest.size - 1, status = 200;
         const range = request.method === 'GET' && request.headers.get('range');
@@ -289,7 +351,7 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
             try {
               if (offset > end) { controller.close(); return; }
               const part = Math.floor(offset / partSize) + 1;
-              const buffer = await get(partKey(manifest.id, part), 'arrayBuffer');
+              const buffer = await get(partKey(storedManifest.id, part), 'arrayBuffer');
               if (!buffer) throw new Error('Nedostaje dio datoteke.');
               const bytes = new Uint8Array(buffer), within = offset % partSize, length = Math.min(bytes.length - within, end - offset + 1);
               if (length < 1) throw new Error('Neispravna datoteka.');
