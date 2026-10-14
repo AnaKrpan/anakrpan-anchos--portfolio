@@ -1,5 +1,6 @@
 import { ORIGINAL_PART_SIZE } from './original-storage.js';
 import SparkMD5 from './vendor/spark-md5.js';
+import viewingCopies from './viewing-copies.js';
 const PART_SIZE = 512 * 1024;
 const LEGACY_PART_SIZE = 2 * 1024 * 1024;
 const MAX_SIZE = 2 * 1024 * 1024 * 1024;
@@ -113,7 +114,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
     try {
       if (path === '/api/health' && request.method === 'GET') {
         await store.getMetadata('state', { consistency: 'strong' });
-        return json({ ready: true, build: 'original-video-delivery-v4', originalStorageConfigured:!!originals });
+        return json({ ready: true, build: 'mobile-viewing-v5', originalStorageConfigured:!!originals });
       }
       if (path === '/uredi' && ['GET', 'HEAD'].includes(request.method)) {
         const destination = await authorized(request) ? '/index.html' : '/prijava.html';
@@ -379,6 +380,10 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         if (!visible) await owner(request);
         const manifest = await get('media/' + path.slice(7));
         if (!manifest) fail(404, 'Datoteka ne postoji.');
+        const viewingCopy=viewingCopies[path];
+        if(visible && url.searchParams.get('original')!=='1' && viewingCopy?.originalSize===manifest.size){
+          return new Response(null,{status:307,headers:{location:new URL(viewingCopy.url,url.origin).href,'cache-control':'no-store'}});
+        }
         if (manifest.backend === 'r2' && originals) {
           const key=url.searchParams.get('original')==='1'?manifest.objectKey:manifest.playback?.ready?manifest.playback.key:manifest.objectKey;
           return new Response(null,{status:307,headers:{location:await originals.signedURL(key,request.method,{},visible?21600:1800), 'cache-control':'no-store','referrer-policy':'no-referrer'}});

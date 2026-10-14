@@ -1,0 +1,30 @@
+name: Prepare mobile viewing copies
+on:
+  push:
+    branches: [mobile-video-copies]
+    paths: ['scripts/prepare-mobile-videos.py', '.github/workflows/mobile-video-copies.yml']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mobile-video-copies
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Encode and fully decode viewing copies
+        run: python3 scripts/prepare-mobile-videos.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm test && npm run build
+      - name: Save verified viewing copies on preparation branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/viewing-videos netlify/edge-functions/lib/viewing-copies.js
+          git commit -m 'Add verified mobile viewing copies; retain original video sources'
+          git push origin HEAD:mobile-video-copies
