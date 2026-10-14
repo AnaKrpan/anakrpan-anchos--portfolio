@@ -153,6 +153,32 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         if (response.status!==202) fail(503,'Prijenos originala nije pokrenut. Sadržaj je zadržan.');
         return json({started:true,originalsRetained:true});
       }
+      if (path === '/api/originals/check' && request.method === 'POST') {
+        sameOrigin(request); await owner(request);
+        if (!originals) fail(503,'Nova pohrana još nije uključena.');
+        // Isolated 64 KiB test object. Never touches any portfolio reference.
+        const bytes=Uint8Array.from({length:65536},(_,i)=>i%251);
+        const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+        const checksum=btoa(String.fromCharCode(...digest));
+        const key='originals/'+crypto.randomUUID()+'.mp4';
+        const uploadId=await originals.start(key,'video/mp4');
+        const signedPart=await originals.partURL(key,uploadId,1,checksum);
+        const uploaded=await dispatch(signedPart.url,{method:'PUT',headers:signedPart.headers,body:bytes,signal:AbortSignal.timeout(25000),redirect:'error'});
+        await uploaded.body?.cancel();
+        if (!uploaded.ok) fail(503,'Probni prijenos nije potvrđen ('+uploaded.status+').');
+        const parts=await originals.list(key,uploadId);
+        if (parts.length!==1 || parts[0].size!==bytes.length || parts[0].checksum!==checksum) fail(503,'Probni original nije potvrđen u pohrani.');
+        await originals.complete(key,uploadId,parts);
+        const head=await originals.head(key);
+        if (!head || head.size!==bytes.length || head.type!=='video/mp4') fail(503,'Podaci probne kopije nisu potvrđeni.');
+        const full=await originals.read(key),copy=await full.arrayBuffer();
+        if (copy.byteLength!==bytes.length || await hash(copy)!==hex(digest)) fail(503,'Izvorni bajtovi probne kopije nisu potvrđeni.');
+        const ranged=await dispatch(await originals.signedURL(key),{headers:{range:'bytes=31-94'},signal:AbortSignal.timeout(25000),redirect:'error'});
+        const rangeBytes=new Uint8Array(await ranged.arrayBuffer());
+        if (ranged.status!==206 || ranged.headers.get('content-range')!=='bytes 31-94/65536' || rangeBytes.length!==64 || rangeBytes.some((v,i)=>v!==bytes[31+i])) fail(503,'Dostava dijelova originala nije potvrđena.');
+        await store.setJSON('original-storage-checks/'+url.host,{verifiedAt:new Date(now()).toISOString(),key,sha256:hex(digest)});
+        return json({verified:true,originalBytesPreserved:true,rangeVerified:true,portfolioUnchanged:true});
+      }
       if (path === '/api/content' && request.method === 'GET') {
         const state = await get('state');
         return json(state?.published || { document: initialDocument, revision: 0 });

@@ -125,3 +125,20 @@ test('unpublished direct original and migration endpoint remain owner-only',asyn
   assert.equal((await app.fetch(new Request('https://site.test/api/originals/migrate',{method:'POST',headers:{cookie,origin:'https://other.test'}}))).status,403);assert.equal(dispatched,0);
   assert.equal((await app.fetch(new Request('https://site.test/api/originals/migrate',{method:'POST',headers:{cookie,origin:'https://site.test'}}))).status,200);assert.equal(dispatched,1);
 });
+
+test('owner storage probe verifies full original bytes and ranges without modifying published or private content',async()=>{
+  const store=new Store(),originals=storageFixture(),seeded=await seed(store,new Uint8Array(101).fill(9));
+  const dispatch=async(url,options)=>{
+    if(options.method==='PUT')return originals.put(url,options);
+    const target=new URL(url),key=target.pathname.slice('/test/'.length),bytes=originals.objects.get(key).bytes;
+    assert.equal(options.headers.range,'bytes=31-94');
+    return new Response(bytes.slice(31,95),{status:206,headers:{'content-range':'bytes 31-94/'+bytes.length}});
+  };
+  const app=createPortfolio({store,originals,dispatch,password:'test-password-long-enough',initialDocument,log:()=>{}});
+  const url='https://site.test/api/originals/check';
+  assert.equal((await app.fetch(new Request(url,{method:'POST',headers:{origin:'https://site.test'}}))).status,401);assert.equal(originals.uploads.size,0);
+  const login=await app.fetch(new Request('https://site.test/api/login',{method:'POST',headers:{origin:'https://site.test'},body:JSON.stringify({password:'test-password-long-enough'})}));const cookie=login.headers.get('set-cookie').split(';')[0];
+  const result=await app.fetch(new Request(url,{method:'POST',headers:{cookie,origin:'https://site.test'}}));assert.equal(result.status,200);assert.equal((await result.json()).verified,true);
+  assert.deepEqual(await store.get('state'),seeded.state);assert.deepEqual(await store.get('media/'+seeded.file),seeded.manifest);assert.equal(store.deletes,0);
+  assert(await store.get('original-storage-checks/site.test'));
+});
