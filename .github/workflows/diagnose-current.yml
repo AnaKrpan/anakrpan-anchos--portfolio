@@ -1,0 +1,61 @@
+name: Diagnose current public video delivery
+on:
+  push:
+    branches: [diagnose-current-originals]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install metadata probe
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Inspect published video routes, codecs and bounded ranges
+        shell: python
+        run: |
+          import urllib.request,json,struct,time,subprocess,urllib.parse
+          origin='https://anakrpan-anchos-potrfolio.netlify.app'
+          def get(path,start=None,end=None):
+            headers={} if start is None else {'Range':f'bytes={start}-{end}'}
+            t=time.monotonic()
+            with urllib.request.urlopen(urllib.request.Request(origin+path,headers=headers),timeout=60) as r:
+              data=r.read(4194305)
+              cr=r.headers.get('Content-Range','')
+              host=urllib.parse.urlparse(r.geturl()).hostname
+              print('PROBE',json.dumps({'range':headers.get('Range'),'status':r.status,'contentRange':cr,'bytes':len(data),'seconds':round(time.monotonic()-t,3),'delivery':'r2' if host.endswith('.r2.cloudflarestorage.com') else 'netlify','cache':r.headers.get('Cache-Control')}),flush=True)
+              return data,cr
+          health=json.loads(get('/api/health')[0]);print('HEALTH',json.dumps(health),flush=True)
+          content=json.loads(get('/api/content')[0]);doc=content['document']
+          print('PUBLIC_REVISION',content.get('revision'),flush=True)
+          for idx,v in enumerate(doc['videos']):
+            print('VIDEO_SLOT',idx+1,'PRESENT',bool(v.get('src')),flush=True)
+            if not v.get('src','').startswith('/media/'): continue
+            try:
+              path=v['src']; head,cr=get(path,0,31); total=int(cr.split('/')[-1]); pos=0; ftyp=b''; moov=None
+              print('TOTAL_BYTES',total,flush=True)
+              for n in range(24):
+                h,_=get(path,pos,min(total-1,pos+31))
+                size,typ=struct.unpack('>I4s',h[:8])
+                if size==1: size=struct.unpack('>Q',h[8:16])[0]
+                if size==0: size=total-pos
+                print('BOX',typ.decode('ascii',errors='replace'),pos,size,flush=True)
+                if size<8: break
+                if typ in [b'ftyp',b'moov'] and size<=4194304:
+                  box,_=get(path,pos,pos+size-1)
+                  if typ==b'ftyp': ftyp=box
+                  else: moov=box;break
+                pos+=size
+                if pos>=total:break
+              if moov:
+                avcc=moov.find(b'avcC')
+                if avcc>=0: print('AVC_CONFIG',json.dumps({'profile_idc':moov[avcc+5],'level_idc':moov[avcc+7]}),flush=True)
+                fn=f'/tmp/video-{idx}.mp4';open(fn,'wb').write(ftyp+moov)
+                p=subprocess.run(['ffprobe','-v','quiet','-show_streams','-of','json',fn],capture_output=True,text=True,timeout=20)
+                streams=json.loads(p.stdout).get('streams',[])
+                print('METADATA',json.dumps([{k:s[k] for k in ['codec_type','codec_name','codec_tag_string','width','height','r_frame_rate','duration','bit_rate'] if k in s} for s in streams]),flush=True)
+              for start in [0,max(0,total//2-64),max(0,total-64)]:
+                end=min(total-1,start+(2097151 if start==0 else 63))
+                data,_=get(path,start,end)
+                if len(data)!=end-start+1: raise RuntimeError('Range truncated')
+            except Exception as e: print('DIAGNOSIS_ERROR',type(e).__name__,str(e).split('?')[0][:180],flush=True)
