@@ -4,10 +4,34 @@
 <h1>Provjera pohrane videa</h1><p>Ova provjera ne mijenja tvoj portfolio ni postojeće videe.</p>
 <form id="login"><label>Lozinka za uređivanje portfolija<input id="password" type="password" autocomplete="current-password" required></label><button>Prijavi se</button></form>
 <button id="check" hidden>Provjeri pohranu</button><p id="status" role="status" aria-live="polite"></p>
+<script src="/upload-tools.js"></script>
 <script>
 const status=document.querySelector('#status'),form=document.querySelector('#login'),button=document.querySelector('#check');
 async function request(path,options={}){const r=await fetch(path,{...options,signal:AbortSignal.timeout(120000)});const d=await r.json();if(!r.ok)throw new Error((d.error||'Provjera nije uspjela.')+(d.trace?' Oznaka: '+d.trace:''));return d;}
-form.addEventListener('submit',async e=>{e.preventDefault();try{await request('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.querySelector('#password').value})});document.querySelector('#password').value='';form.hidden=true;button.hidden=false;status.textContent='Prijavljena si. Klikni „Provjeri pohranu”.';}catch(error){status.textContent=error.message;}});
-button.addEventListener('click',async()=>{button.disabled=true;status.textContent='Provjeravam prijenos, originalne bajtove i dostavu…';try{const d=await request('/api/originals/check',{method:'POST'});if(!d.verified)throw new Error('Pohrana još nije potvrđena.');status.textContent='Provjera je uspjela. Pohrana je primila iste bajtove i ispravno ih dostavila. Postojeći portfolio nije mijenjan.';}catch(error){status.textContent=error.message;}finally{button.disabled=false;}});
-request('/api/session').then(d=>{if(d.canEdit){form.hidden=true;button.hidden=false;}}).catch(()=>{});
+form.addEventListener('submit',async e=>{e.preventDefault();try{await request('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.querySelector('#password').value})});document.querySelector('#password').value='';form.hidden=true;button.hidden=false;await checkBrowser();}catch(error){status.textContent=error.message;}});
+let checking=false;
+async function checkBrowser(){
+ if(checking)return;checking=true;button.disabled=true;
+ try{
+  status.textContent='Provjeravam izravni prijenos s mobitela…';
+  const bytes=Uint8Array.from({length:8*1024*1024+97},(_,i)=>i%251);
+  const uploader=PortfolioUploads.createUploader({request,report:text=>status.textContent=text});
+  const result=await uploader.upload(new Blob([bytes]),'video/mp4');
+  status.textContent='Provjeravam da su svi originalni bajtovi sačuvani…';
+  const response=await fetch(result.url,{signal:AbortSignal.timeout(120000)});
+  if(!response.ok)throw new Error('Probnu kopiju nije moguće pročitati.');
+  const copied=await response.arrayBuffer();
+  const digest=await crypto.subtle.digest('SHA-256',copied);
+  const sha256=Array.from(new Uint8Array(digest),x=>x.toString(16).padStart(2,'0')).join('');
+  if(copied.byteLength!==bytes.length || sha256!=='4c4f9a7de2280f04112a35196ceb0010a0230d9a3d7e7f3da971f81016c383e5')throw new Error('Izvorni bajtovi probne kopije nisu potvrđeni.');
+  const start=8*1024*1024-31,end=start+63;
+  const ranged=await fetch(result.url,{headers:{range:'bytes='+start+'-'+end},signal:AbortSignal.timeout(30000)});
+  const rangeBytes=new Uint8Array(await ranged.arrayBuffer());
+  if(ranged.status!==206 || ranged.headers.get('content-range')!=='bytes '+start+'-'+end+'/'+bytes.length || rangeBytes.length!==64 || rangeBytes.some((v,i)=>v!==bytes[start+i]))throw new Error('Dostava za gledanje još nije potvrđena.');
+  await request('/api/originals/browser-check',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({src:result.url,sha256,rangeVerified:true})});
+  status.textContent='Provjera na mobitelu je uspjela. Izravni prijenos, originalni bajtovi i dostava su potvrđeni. Postojeći portfolio nije mijenjan.';
+ }catch(error){status.textContent=error.message;}finally{checking=false;button.disabled=false;}
+}
+button.addEventListener('click',checkBrowser);
+request('/api/session').then(d=>{if(d.canEdit){form.hidden=true;button.hidden=false;checkBrowser();}}).catch(()=>{});
 </script></html>

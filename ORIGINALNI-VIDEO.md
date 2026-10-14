@@ -35,7 +35,7 @@ Stari video dijelovi i izvorni manifest trajno se zadržavaju u ovom postupku. A
 5. Postaviti CORS na spremniku samo za stvarni javni i odobreni probni Netlify origin: metode GET, HEAD, PUT; zaglavlja Content-Type, Range, Content-MD5; izložena zaglavlja ETag, Content-Range, Accept-Ranges, Content-Length i x-amz-checksum-sha256. Predložak je u `config/r2-cors.json`. Probni origin treba dodati izričito, ne wildcard.
 6. Prvo provjeriti stvarne S3 API pozive, Content-MD5-potpisani upload, nastavak nakon prekida, gubitak završne potvrde i byte-range čitanje na probnoj datoteci. `scripts/verify-original-storage.mjs` koristi izolirani privremeni objekt, provjerava cijeli SHA-256 i stvarni HTTP Range. Taj objekt nije video korisnice; skripta ga ne briše automatski. Ovaj korak još nije izvršen bez pohrane.
 7. Prije glavne objave usporediti izgled i objavljeni dokument s postojećom verzijom. Pri probnom uređivanju ne mijenjati postojeći nacrt jer je Blob spremnik na razini web projekta.
-8. Tek nakon uspješnog testa povezane pohrane objaviti kôd na glavnoj grani i potvrditi ispravno ponašanje na istom javnom linku. Migraciju omogućiti samo u produkciji: `ORIGINAL_VIDEO_MIGRATION=enabled`. Kada vlasnica otvori `/uredi`, kopiranje kreće u pozadini. Ponovno otvaranje može nastaviti nedovršeno kopiranje.
+8. Tek nakon uspješnog testa povezane pohrane objaviti kôd na glavnoj grani i potvrditi ispravno ponašanje na istom javnom linku. Migracija se prema zadanim postavkama pokreće samo na postojećem produkcijskom hostu, kada je R2 povezan; na probnoj verziji ostaje isključena. Za izričito zaustavljanje postaviti `ORIGINAL_VIDEO_MIGRATION=disabled`. Kada vlasnica otvori `/uredi`, kopiranje kreće u pozadini. Ponovno otvaranje može nastaviti nedovršeno kopiranje.
 9. Provjeriti puni SHA-256 migriranih stvarnih videa, cjelovitu reprodukciju i traženje mjesta u videu na mobitelu. Tek tada izvijestiti da nova dostava radi. Za povratak, isključiti `ORIGINAL_VIDEO_STORAGE` i migraciju: migrirani originali imaju stari manifest, a novi R2 originali nisu dostupni bez povezanih R2 ključeva; zato ne uklanjati ključeve nakon prvog novog videa bez prethodne kopije.
 
 ## Granice
@@ -48,3 +48,8 @@ R2 nije povezan u ovoj sesiji: nema računa, spremnika niti runtime pristupnih k
 ## Provjera stvarnog R2 prijenosa, 14. listopada
 
 Vlasnička probna provjera vratila je HTTP 501 pri UploadPart zahtjevu s x-amz-checksum-sha256. Multipart započinjanje prošlo je, a dio nije prihvaćen. Promjena koristi izričito podržani Content-MD5 vezan uz potpis; potpuna SHA-256 usporedba migriranih originala ostaje. Potrebno je dodati Content-MD5 u AllowedHeaders R2 CORS pravila prije izravnog prijenosa iz preglednika. Ni ova pogreška ni provjera nisu mijenjale postojeće originale ili dokumente. Stvarna ponovljena provjera još treba uspjeti.
+
+
+## Završna provjera na mobitelu
+
+Vlasnica je uspješno provjerila stvarni R2 prijenos i puni checksum probne datoteke nakon promjene na Content-MD5 te spremila CORS pravilo s Content-MD5 za javni i probni origin. Stranica provjera-pohrane.html sada automatski pokreće test stvarnim browser uploaderom: 8 MiB + 97 bajtova, dva multipart dijela, izravni CORS PUT, ponovno čitanje cijelog sadržaja, SHA-256 i Range preko granice dijela. Datoteka se ne dodaje u javni ni privatni dokument. Aktivacija na glavnoj grani još čeka uspješan ishod ove provjere.

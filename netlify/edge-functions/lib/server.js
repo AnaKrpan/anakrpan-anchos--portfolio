@@ -184,6 +184,16 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         await store.setJSON('original-storage-checks/'+url.host,{verifiedAt:new Date(now()).toISOString(),key,sha256:hex(digest)});
         return json({verified:true,originalBytesPreserved:true,rangeVerified:true,portfolioUnchanged:true});
       }
+      if (path === '/api/originals/browser-check' && request.method === 'POST') {
+        sameOrigin(request); await owner(request);
+        const data=await readJSON(request,4096);
+        const expected='4c4f9a7de2280f04112a35196ceb0010a0230d9a3d7e7f3da971f81016c383e5';
+        if (!data.src?.startsWith('/media/') || !sourceOK(data.src) || data.sha256!==expected || data.rangeVerified!==true) fail(400,'Provjera izvornog prijenosa nije potvrđena.');
+        const manifest=await get('media/'+data.src.slice(7));
+        if (!manifest || manifest.backend!=='r2' || manifest.size!==ORIGINAL_PART_SIZE+97 || manifest.type!=='video/mp4') fail(400,'Probni original nije spremljen.');
+        await store.setJSON('original-browser-checks/'+url.host,{verifiedAt:new Date(now()).toISOString(),src:data.src,sha256:expected,rangeVerified:true});
+        return json({verified:true});
+      }
       if (path === '/api/content' && request.method === 'GET') {
         const state = await get('state');
         return json(state?.published || { document: initialDocument, revision: 0 });

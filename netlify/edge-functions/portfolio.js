@@ -8,6 +8,8 @@ export default async function handler(request, context) {
   const store = getStore('anchos-portfolio-v1');
   const config = originalStorageConfig(name=>Netlify.env.get(name));
   const originals = config ? createOriginalStorage(config) : null;
-  const migrationEnabled=Netlify.env.get('ORIGINAL_VIDEO_MIGRATION') === 'enabled';
+  // Only the existing production host starts copying old originals by default.
+  // Previews stay disabled; the operator can explicitly disable migration.
+  const migrationEnabled=!!originals && new URL(request.url).hostname==='anakrpan-anchos-potrfolio.netlify.app' && Netlify.env.get('ORIGINAL_VIDEO_MIGRATION') !== 'disabled';
   return createPortfolio({ store, password, initialDocument, originals, migrationEnabled }).fetch(request, context);
 }

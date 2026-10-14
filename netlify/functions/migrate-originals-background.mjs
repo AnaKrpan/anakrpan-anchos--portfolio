@@ -4,7 +4,7 @@ import {migrateOriginal} from '../edge-functions/lib/migrate-originals.js';
 
 export default async function handler(request) {
   const password=process.env.PORTFOLIO_PASSWORD || '';
-  if (password.length<16 || process.env.ORIGINAL_VIDEO_MIGRATION!=='enabled') return new Response(null,{status:403});
+  if (password.length<16 || process.env.ORIGINAL_VIDEO_MIGRATION==='disabled') return new Response(null,{status:403});
   const signature=request.headers.get('x-anchos-signature');
   if (!/^[a-f0-9]{64}$/.test(signature || '')) return new Response(null,{status:403});
   const body=await request.text();
