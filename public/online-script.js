@@ -274,7 +274,7 @@ const draftReady = (async () => {
           try{
             const progress=await requestJSON('/api/originals/status');
             if(progress.verified===progress.total){
-              message('Svi postojeći originali su provjereni i pripremljeni za gledanje. Javni link i sadržaj ostaju isti.');
+              message(failedVideoSlots.size?'Postojeći videi su pripremljeni, ali prijenos nije uspio za: '+failedVideoNames()+'.':'Svi postojeći originali su provjereni i pripremljeni za gledanje. Javni link i sadržaj ostaju isti.');
               document.querySelectorAll('video').forEach(video=>{if(video.paused && video.getAttribute('src'))video.load();});
               return;
             }

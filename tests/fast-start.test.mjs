@@ -76,3 +76,13 @@ test('public playback chooses the prepared copy but an original download still s
  assert.equal((await app.fetch(new Request('https://site.test/media/'+file))).status,307);assert.equal(calls[0].key,playback);assert.equal(calls[0].expires,21600);
  assert.equal((await app.fetch(new Request('https://site.test/media/'+file+'?original=1'))).status,307);assert.equal(calls[1].key,original);
 });
+
+test('migration progress does not claim playback is ready merely because an earlier original copy finished',async()=>{
+ const store=new Store(),file=crypto.randomUUID()+'.mp4',document=structuredClone(initialDocument);document.videos[0].src='/media/'+file;
+ await store.setJSON('state',{published:{document}});const manifest={backend:'r2',objectKey:'originals/'+file,type:'video/mp4',size:123};await store.setJSON('media/'+file,manifest);await store.setJSON('original-migrations/'+file,{status:'verified',copiedBytes:123});
+ const password='test-password-long-enough',app=createPortfolio({store,password,initialDocument,log:()=>{}});
+ const login=await app.fetch(new Request('https://site.test/api/login',{method:'POST',headers:{origin:'https://site.test'},body:JSON.stringify({password})}));const cookie=login.headers.get('set-cookie').split(';')[0];
+ const request=()=>new Request('https://site.test/api/originals/status',{headers:{cookie}});
+ let status=await (await app.fetch(request())).json();assert.equal(status.verified,0);assert.equal(status.total,1);
+ await store.setJSON('media/'+file,{...manifest,playback:{ready:true,key:manifest.objectKey}});status=await (await app.fetch(request())).json();assert.equal(status.verified,1);
+});

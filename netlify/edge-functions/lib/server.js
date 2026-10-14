@@ -161,7 +161,8 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         const progress=await Promise.all(files.map(async src=>{
           const file=src.slice(7),manifest=await get('media/'+file),job=await get('original-migrations/'+file),playback=await get('playback-preparations/'+file);
           const ready=manifest?.backend==='r2'&&(manifest.type!=='video/mp4'||manifest.playback?.ready);
-          return {status:ready?'verified':playback?.status||job?.status || 'waiting',bytes:manifest?.size || 0,copiedBytes:ready?manifest.size:playback?.copiedBytes||job?.copiedBytes || 0};
+          const status=ready?'verified':manifest?.backend==='r2'?playback?.status||'waiting':job?.status||'waiting';
+          return {status,bytes:manifest?.size || 0,copiedBytes:ready?manifest.size:playback?.copiedBytes||(manifest?.backend==='r2'?0:job?.copiedBytes)||0};
         }));
         return json({total:progress.length,verified:progress.filter(p=>p.status==='verified').length,paused:progress.some(p=>p.status==='paused'),copiedBytes:progress.reduce((n,p)=>n+p.copiedBytes,0),totalBytes:progress.reduce((n,p)=>n+p.bytes,0)});
       }
