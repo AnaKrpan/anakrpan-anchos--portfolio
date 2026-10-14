@@ -1,0 +1,53 @@
+name: Diagnose public video metadata
+on:
+  push:
+    branches: [diagnose-video-codecs]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Inspect original video metadata and delivery
+        shell: python
+        run: |
+          import urllib.request, json, struct, time, subprocess
+          origin='https://anakrpan-anchos-potrfolio.netlify.app'
+          def get(path,start=None,end=None):
+            headers={} if start is None else {'Range':f'bytes={start}-{end}'}
+            t=time.monotonic()
+            with urllib.request.urlopen(urllib.request.Request(origin+path,headers=headers),timeout=45) as r:
+              data=r.read(4194305)
+              print('PROBE',json.dumps({'range':headers.get('Range'),'status':r.status,'contentRange':r.headers.get('Content-Range'),'bytes':len(data),'seconds':round(time.monotonic()-t,3)}),flush=True)
+              return data,r.headers.get('Content-Range','')
+          doc=json.loads(get('/api/content')[0])['document']
+          for idx,v in enumerate(doc['videos']):
+            if not v.get('src','').startswith('/media/'): continue
+            print('VIDEO_SLOT',idx,flush=True)
+            try:
+              path=v['src']; head,cr=get(path,0,31); total=int(cr.split('/')[-1]); pos=0; ftyp=b''; moov=None
+              print('TOTAL_BYTES',total,flush=True)
+              for n in range(20):
+                h,_=get(path,pos,min(total-1,pos+31))
+                size,typ=struct.unpack('>I4s',h[:8])
+                if size==1: size=struct.unpack('>Q',h[8:16])[0]
+                if size==0: size=total-pos
+                print('BOX',typ.decode('ascii',errors='replace'),pos,size,flush=True)
+                if size<8: break
+                if typ in [b'ftyp',b'moov'] and size<=4194304:
+                  box,_=get(path,pos,pos+size-1)
+                  if typ==b'ftyp': ftyp=box
+                  else: moov=box; break
+                pos+=size
+                if pos>=total: break
+              if moov:
+                fn=f'/tmp/video-{idx}.mp4'
+                open(fn,'wb').write(ftyp+moov)
+                p=subprocess.run(['ffprobe','-v','error','-show_streams','-show_format','-of','json',fn],capture_output=True,text=True,timeout=20)
+                print('METADATA',p.stdout,flush=True)
+                print('METADATA_ERROR',p.stderr[:500],flush=True)
+              # Bounded 2 MB cross-chunk throughput probe, no content changes.
+              b,_=get(path,0,min(total-1,2097151))
+              print('DELIVERY_BYTES',len(b),flush=True)
+            except Exception as e: print('DIAGNOSIS_ERROR',type(e).__name__,str(e),flush=True)
