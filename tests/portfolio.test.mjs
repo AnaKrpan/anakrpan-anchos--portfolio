@@ -127,6 +127,13 @@ test('chunk upload persists binary video; private until published; public byte r
   const suffix = await env.call(media, { auth: false, headers: { range: 'bytes=-20' } }); assert.deepEqual(new Uint8Array(await suffix.arrayBuffer()), bytes.slice(-20));
   assert.equal((await env.call(media, { auth: false, headers: { range: 'bytes=999999999-' } })).status, 416);
   const full = await env.call(media, { auth: false }); assert.equal(full.status, 200); assert.deepEqual(new Uint8Array(await full.arrayBuffer()), bytes);
+  const openRange = await env.call(media, { auth: false, headers: { range: 'bytes=0-' } });
+  assert.equal(openRange.status, 206);
+  assert.equal(openRange.headers.get('content-range'), 'bytes 0-' + (size - 1) + '/' + size);
+  assert.equal(openRange.headers.get('content-length'), String(size));
+  assert.deepEqual(new Uint8Array(await openRange.arrayBuffer()), bytes);
+  const largeSuffix = await env.call(media, { auth: false, headers: { range: 'bytes=-1048590' } });
+  assert.deepEqual(new Uint8Array(await largeSuffix.arrayBuffer()), bytes.slice(-1048590));
   const head = await env.call(media, { auth: false, method: 'HEAD' }); assert.equal(head.headers.get('content-length'), String(size)); assert.equal(await head.text(), '');
   const freshRuntime = createPortfolio({ store: env.store, password, initialDocument: { ...initialDocument, title: 'A later code deploy' } });
   const stillSaved = await freshRuntime.fetch(new Request('https://portfolio.example/api/content')); assert.equal((await stillSaved.json()).document.videos[0].src, media);

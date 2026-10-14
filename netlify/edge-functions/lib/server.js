@@ -216,8 +216,9 @@ export function createPortfolio({ store, password, initialDocument, now = () => 
           if (!match[1]) start = Math.max(0, manifest.size - Number(match[2]));
           else { start = Number(match[1]); if (match[2]) end = Math.min(end, Number(match[2])); }
           if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= manifest.size) return json({ error: 'Neispravan raspon.' }, 416, { 'content-range': 'bytes */' + manifest.size });
-          // Bounded ranges let mobile players seek without downloading the entire video.
-          end = Math.min(end, start + partSize - 1); status = 206;
+          // Honor the player's entire requested range. Storage chunks are only an
+          // internal detail; truncating a bytes=0- response can stall playback.
+          status = 206;
           headers.set('content-range', `bytes ${start}-${end}/${manifest.size}`);
         }
         headers.set('content-length', String(end - start + 1));
