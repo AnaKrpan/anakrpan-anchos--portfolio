@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { getStore } from '@netlify/blobs';
 
 test('installed Netlify SDK honors actual conditional request headers and closes unused responses', async () => {
-  const objects=new Map(); let serial=0,cancelled=0;
+  const objects=new Map(), requests=[]; let serial=0,cancelled=0;
   const discardedResponse=(status,headers={})=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('unused response'));},cancel(){cancelled++;}}),{status,headers});
   const transport=async (input,options={})=>{
     const url=new URL(input), headers=new Headers(options.headers), method=options.method||'GET';
-    const key=url.pathname.includes('/object/') ? decodeURIComponent(url.pathname.split('/object/')[1]) : url.pathname.split('/sdk-test/')[1];
+    const key=decodeURIComponent(url.pathname.split('/').at(-1));
+    requests.push({key,method,ifMatch:headers.get('if-match'),ifNone:headers.get('if-none-match'),signing:headers.get('accept')?.includes('type=signed-url')||false});
     if(headers.get('accept')?.includes('type=signed-url'))return Response.json({url:'https://objects.invalid/object/'+encodeURIComponent(key)});
     const old=objects.get(key);
     if(method==='PUT'){
@@ -20,7 +21,7 @@ test('installed Netlify SDK honors actual conditional request headers and closes
   };
   const store=getStore({name:'sdk-test',siteID:'fixture-site',token:'fixture-only',apiURL:'https://api.invalid',fetch:transport});
   const first=await store.setJSON('state',{version:1},{onlyIfNew:true}); assert.equal(first.modified,true);
-  assert.equal((await store.setJSON('state',{version:2},{onlyIfNew:true})).modified,false);
+  assert.equal((await store.setJSON('state',{version:2},{onlyIfNew:true})).modified,false,JSON.stringify(requests));
   assert.equal((await store.setJSON('state',{version:2},{onlyIfMatch:'"wrong"'})).modified,false);
   const changed=await store.setJSON('state',{version:2},{onlyIfMatch:first.etag}); assert.equal(changed.modified,true);
   assert.deepEqual(await store.get('state',{type:'json'}),{version:2});
