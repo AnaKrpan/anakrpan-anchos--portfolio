@@ -106,7 +106,7 @@ function captureDraft() {
     photos: Array.from(document.querySelectorAll('[data-photo]'), el => ({ src: el.getAttribute('src'), alt: el.alt })),
     email: document.querySelector('#contact-email').textContent, phone: document.querySelector('#contact-phone').textContent,
     colors: ['paper','sand','ink'].map(name => getComputedStyle(document.documentElement).getPropertyValue('--' + name).trim()),
-    videos: Array.from(document.querySelectorAll('[data-video-slot]'), card => ({ slot: card.dataset.videoSlot, key: card.dataset.mediaKey || '', name: card.dataset.mediaName || '', src: (card.querySelector('video').getAttribute('src') || '').replace(/^blob:.*$/, ''), present: !!card.querySelector('video').getAttribute('src') }))
+    videos: Array.from(document.querySelectorAll('[data-video-slot]'), card => {const video=card.querySelector('video'),src=(video.dataset.mediaSrc||video.getAttribute('src')||'').replace(/^blob:.*$/,'');return {slot:card.dataset.videoSlot,key:card.dataset.mediaKey||'',name:card.dataset.mediaName||'',src,present:!!src};})
   };
 }
 function safeTextHTML(value) {
@@ -201,7 +201,7 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
       const type=byExt[(file.name.split('.').pop()||'').toLowerCase()] || file.type;
       const result=await uploadFile(file,type,report);
       if (videoEpochs.get(slot)!==epoch) return;
-      video.pause(); video.removeAttribute('poster'); video.src=result.url; video.hidden=false; video.load(); card.querySelector('.video-placeholder').hidden=true;
+      PortfolioVideoLoading.controller(video).set(result.url); card.querySelector('.video-placeholder').hidden=true;
       card.dataset.mediaName=file.name; markDirty(); const saved = await saveChanges();
       failedVideoSlots.delete(slot);
       progress.textContent = saved === true && !dirty ? 'Video i nacrt su spremljeni. Klikni „Spremi i objavi”.' : 'Video je prenesen, ali nacrt još nije spremljen. Klikni „Spremi i objavi” i pričekaj potvrdu.';
@@ -211,21 +211,17 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
   });
   card.querySelector('.remove-video').addEventListener('click',() => {
     videoEpochs.set(slot,(videoEpochs.get(slot)||0)+1);
-    video.pause(); video.removeAttribute('src'); video.load(); video.hidden=true;
+    PortfolioVideoLoading.controller(video).set('');
     card.querySelector('.video-placeholder').hidden=false; delete card.dataset.mediaName; markDirty();
   });
   video.addEventListener('play',() => {video.preload='auto';document.querySelectorAll('video').forEach(other => {if(other!==video){other.pause();other.preload='none';}});});
   video.addEventListener('error',() => {if(editing&&!failedVideoSlots.size)message('Pregled videa se nije pokrenuo. Spremljena datoteka i tekst ostaju sačuvani.');});
 });
-if('IntersectionObserver' in window){
-  const nearVideos=new IntersectionObserver(entries=>{for(const entry of entries){const video=entry.target.querySelector('video');if(entry.isIntersecting&&video.paused)video.preload='metadata';}},{rootMargin:'100px'});
-  document.querySelectorAll('[data-video-slot]').forEach(card=>nearVideos.observe(card));
-}else document.querySelectorAll('video').forEach(video=>video.preload='metadata');
 function applyDocument(doc) {
   PortfolioCollaborations.restore(doc.collaborations);
   document.title=doc.title; document.querySelector('meta[name="description"]').content=doc.description;
   document.querySelectorAll('[data-edit]').forEach((el,i) => {if(typeof doc.texts[i]==='string')el.innerHTML=safeTextHTML(doc.texts[i]);});
-  document.querySelectorAll('[data-photo]').forEach((el,i) => {const photo=doc.photos[i];if(photo){el.src=photo.src;el.alt=photo.alt;}});
+  document.querySelectorAll('[data-photo]').forEach((el,i) => {const photo=doc.photos[i];if(photo){if(el.getAttribute('src')!==photo.src)el.src=photo.src;el.alt=photo.alt;}});
   document.querySelector('#contact-email').textContent=doc.email;
   document.querySelectorAll('[data-email-link]').forEach(el => el.href='mailto:'+doc.email+'?subject=Upit%20za%20suradnju');
   const phone=document.querySelector('#contact-phone');phone.textContent=doc.phone;phone.href='tel:'+doc.phone.replace(/[^+\d]/g,'');
@@ -236,11 +232,11 @@ function applyDocument(doc) {
     const video=card.querySelector('video');
     if(state.src){
       const poster=window.PortfolioPosters?.[state.src];
-      if(poster)video.poster=poster;else video.removeAttribute('poster');
+      PortfolioVideoLoading.controller(video).set(state.src,poster);
       video.style.backgroundColor='var(--sand)';
-      video.src=state.src;video.hidden=false;card.querySelector('.video-placeholder').hidden=true;
+      card.querySelector('.video-placeholder').hidden=true;
     }
-    else{video.removeAttribute('src');video.removeAttribute('poster');video.hidden=true;card.querySelector('.video-placeholder').hidden=false;}
+    else{PortfolioVideoLoading.controller(video).set('');card.querySelector('.video-placeholder').hidden=false;}
     card.dataset.mediaName=state.name||'';
   }
 }
@@ -262,7 +258,7 @@ window.addEventListener('beforeunload',event => {if(dirty||pendingFiles||saving|
 const draftReady = (async () => {
   document.querySelector('#start-edit').hidden=true;
   try {
-    const [session,content]=await Promise.all([requestJSON('/api/session'),requestJSON(location.pathname==='/uredi'?'/api/draft':'/api/content')]);
+    const [session,content]=location.pathname==='/uredi'?await Promise.all([requestJSON('/api/session'),requestJSON('/api/draft')]):await requestJSON('/api/content').then(content=>[content,content]);
     if(content.document)applyDocument(content.document);
     revision=content.revision;canEdit=session.canEdit;
     canPrepareOriginals=!!session.canPrepareOriginals;

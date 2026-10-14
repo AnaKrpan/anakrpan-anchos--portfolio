@@ -2,7 +2,7 @@
 import { AwsClient } from './vendor/aws4fetch.js';
 
 export const ORIGINAL_PART_SIZE = 8 * 1024 * 1024;
-const safeKey = key => typeof key === 'string' && /^(originals|playback)\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(key);
+const safeKey = key => typeof key === 'string' && /^(originals|playback|viewing)\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(key);
 const escapeXML = text => String(text).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&apos;' }[c]));
 const unescapeXML = text => text.replace(/&(amp|lt|gt|quot|apos);/g, (_, c) => ({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"}[c]));
 const field = (xml, name) => { const value = xml.match(new RegExp('<'+name+'>([^<]*)</'+name+'>')); return value ? unescapeXML(value[1]) : null; };

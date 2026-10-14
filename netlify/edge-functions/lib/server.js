@@ -65,6 +65,18 @@ export function createPortfolio({ store, password, initialDocument, originals = 
   const get = (key, type = 'json') => store.get(key, { type, consistency: 'strong' });
   const entry = (key, type = 'json') => store.getWithMetadata(key, { type, consistency: 'strong' });
   const emptyState = () => ({ draft: null, published: null });
+  async function ensureViewingCopies(urlOrigin){
+    if(!migrationEnabled||!originals||!Object.keys(viewingCopies).length)return;
+    const jobKey='viewing-copy-bootstrap/v1',previous=await entry(jobKey);
+    if(previous?.data.status==='verified'||previous?.data.retryAt>now())return;
+    const claimed=await store.setJSON(jobKey,{status:'running',retryAt:now()+20*60*1000},previous?{onlyIfMatch:previous.etag}:{onlyIfNew:true});
+    if(!claimed.modified)return;
+    try{
+      const body=JSON.stringify({expires:now()+300000,nonce:crypto.randomUUID()});
+      const response=await dispatch(urlOrigin+'/.netlify/functions/viewing-copies-background',{method:'POST',headers:{'content-type':'application/json','x-anchos-signature':await signed('viewing-copies:'+body)},body,signal:AbortSignal.timeout(10000),redirect:'error'});
+      await response.body?.cancel();if(response.status!==202)throw Error('Preparation unavailable');
+    }catch{await store.setJSON(jobKey,{status:'paused',retryAt:now()+6*60*60*1000});}
+  }
   async function signed(value) {
     const key = await crypto.subtle.importKey('raw', encoder.encode(password), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
     return hex(await crypto.subtle.sign('HMAC', key, encoder.encode(value)));
@@ -114,7 +126,9 @@ export function createPortfolio({ store, password, initialDocument, originals = 
     try {
       if (path === '/api/health' && request.method === 'GET') {
         await store.getMetadata('state', { consistency: 'strong' });
-        return json({ ready: true, build: 'mobile-viewing-v5', originalStorageConfigured:!!originals });
+        await ensureViewingCopies(url.origin);
+        const setup=await get('viewing-copy-bootstrap/v1');
+        return json({ ready: true, build: 'low-bandwidth-v6', originalStorageConfigured:!!originals,viewingCopiesReady:setup?.status==='verified' });
       }
       if (path === '/uredi' && ['GET', 'HEAD'].includes(request.method)) {
         const destination = await authorized(request) ? '/index.html' : '/prijava.html';
@@ -144,7 +158,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         const state=await get('state');
         const files=[...new Set([...(state?.draft?.document?.videos || []),...(state?.published?.document?.videos || [])].map(v=>v.src).filter(src=>src.startsWith('/media/')))];
         const manifests=await Promise.all(files.map(src=>get('media/'+src.slice(7))));
-        return json({canEdit,canPrepareOriginals:true,migrationNeeded:manifests.some(m=>m?.type?.startsWith('video/') && (m.backend!=='r2'||m.type==='video/mp4'&&!m.playback?.ready))});
+        return json({canEdit,canPrepareOriginals:true,migrationNeeded:manifests.some((m,i)=>m?.type?.startsWith('video/') && !viewingCopies[files[i]] && (m.backend!=='r2'||m.type==='video/mp4'&&!m.playback?.ready))});
       }
       if (path === '/api/originals/migrate' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
@@ -209,7 +223,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
       }
       if (path === '/api/content' && request.method === 'GET') {
         const state = await get('state');
-        return json(state?.published || { document: initialDocument, revision: 0 });
+        return json({...state?.published || { document: initialDocument, revision: 0 },canEdit:await authorized(request)});
       }
       if (path === '/api/draft') {
         await owner(request);
@@ -382,6 +396,10 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         if (!manifest) fail(404, 'Datoteka ne postoji.');
         const viewingCopy=viewingCopies[path];
         if(visible && url.searchParams.get('original')!=='1' && viewingCopy?.originalSize===manifest.size){
+          const receipt=await get('viewing-copies/'+path.slice(7));
+          if(originals&&receipt?.verified&&receipt.sha256===viewingCopy.sha256&&receipt.size===viewingCopy.size&&receipt.originalSize===manifest.size){
+            return new Response(null,{status:307,headers:{location:await originals.signedURL(receipt.key,request.method,{},21600),'cache-control':'no-store','referrer-policy':'no-referrer'}});
+          }
           return new Response(null,{status:307,headers:{location:new URL(viewingCopy.url,url.origin).href,'cache-control':'no-store'}});
         }
         if (manifest.backend === 'r2' && originals) {

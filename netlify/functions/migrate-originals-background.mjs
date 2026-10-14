@@ -2,6 +2,7 @@ import {getStore} from '@netlify/blobs';
 import {createOriginalStorage,originalStorageConfig} from '../edge-functions/lib/original-storage.js';
 import {migrateOriginal} from '../edge-functions/lib/migrate-originals.js';
 import {preparePlayback} from '../edge-functions/lib/prepare-playback.js';
+import copies from '../edge-functions/lib/viewing-copies.js';
 
 export default async function handler(request) {
   const password=process.env.PORTFOLIO_PASSWORD || '';
@@ -30,6 +31,7 @@ export default async function handler(request) {
   const originals=createOriginalStorage(config);
   const deadline=Date.now()+13*60*1000;
   for (const file of files) {
+    if(copies['/media/'+file])continue;
     if (Date.now()>deadline-60000) break;
     try { await migrateOriginal({store,originals,file,deadline}); await preparePlayback({store,originals,file,deadline}); }
     catch { console.error(JSON.stringify({event:'original-migration-paused',file,sourceRetained:true})); }
