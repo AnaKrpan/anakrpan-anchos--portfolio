@@ -255,7 +255,23 @@ const draftReady = (async () => {
     if(canEdit && location.pathname==='/uredi')setEditing(true);
     if(canEdit && location.pathname==='/uredi' && session.migrationNeeded) {
       // Production-only migration preserves both published and draft documents.
-      requestJSON('/api/originals/migrate',{method:'POST'}).then(()=>message('Postojeći originali prenose se u novu pohranu. Možeš nastaviti uređivati; sadržaj ostaje sačuvan.')).catch(()=>message('Prijenos postojećih originala još nije pokrenut. Prethodni videi i sve izmjene su zadržani.'));
+      requestJSON('/api/originals/migrate',{method:'POST'}).then(()=>{
+        message('Postojeći originali prenose se u novu pohranu. Možeš nastaviti uređivati; sadržaj ostaje sačuvan.');
+        let checks=0;
+        const check=async()=>{
+          try{
+            const progress=await requestJSON('/api/originals/status');
+            if(progress.verified===progress.total){
+              message('Svi postojeći originali su preneseni i provjereni. Javni link i sadržaj ostaju isti.');
+              document.querySelectorAll('video').forEach(video=>{if(video.paused && video.getAttribute('src'))video.load();});
+              return;
+            }
+            if(progress.paused){message('Kopiranje jednog originala je pauzirano. Stari video je sačuvan. Ponovno otvori uređivanje da nastaviš.');return;}
+            if(++checks<90)setTimeout(check,10000);
+          }catch(_){if(++checks<90)setTimeout(check,10000);}
+        };
+        setTimeout(check,10000);
+      }).catch(()=>message('Prijenos postojećih originala još nije pokrenut. Prethodni videi i sve izmjene su zadržani.'));
     }
   } catch(error) {
     globalNotice.hidden=false;globalNotice.textContent='Spremljeni portfolio nije moguće učitati: '+error.message+' Osvježi stranicu i pokušaj ponovno.';

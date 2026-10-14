@@ -113,7 +113,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
     try {
       if (path === '/api/health' && request.method === 'GET') {
         await store.getMetadata('state', { consistency: 'strong' });
-        return json({ ready: true, build: 'video-repair-v2' });
+        return json({ ready: true, build: 'original-video-delivery-v3', originalStorageConfigured:!!originals });
       }
       if (path === '/uredi' && ['GET', 'HEAD'].includes(request.method)) {
         const destination = await authorized(request) ? '/index.html' : '/prijava.html';
@@ -153,6 +153,16 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         await response.body?.cancel();
         if (response.status!==202) fail(503,'Prijenos originala nije pokrenut. Sadržaj je zadržan.');
         return json({started:true,originalsRetained:true});
+      }
+      if (path === '/api/originals/status' && request.method === 'GET') {
+        await owner(request);
+        const state=await get('state');
+        const files=[...new Set([...(state?.draft?.document?.videos || []),...(state?.published?.document?.videos || [])].map(v=>v.src).filter(src=>/^\/media\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(src)))];
+        const progress=await Promise.all(files.map(async src=>{
+          const file=src.slice(7),manifest=await get('media/'+file),job=await get('original-migrations/'+file);
+          return {status:manifest?.backend==='r2'?'verified':job?.status || 'waiting',bytes:manifest?.size || 0,copiedBytes:manifest?.backend==='r2'?manifest.size:job?.copiedBytes || 0};
+        }));
+        return json({total:progress.length,verified:progress.filter(p=>p.status==='verified').length,paused:progress.some(p=>p.status==='paused'),copiedBytes:progress.reduce((n,p)=>n+p.copiedBytes,0),totalBytes:progress.reduce((n,p)=>n+p.bytes,0)});
       }
       if (path === '/api/originals/check' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
