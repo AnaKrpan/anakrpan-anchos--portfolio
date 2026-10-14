@@ -1,0 +1,22 @@
+name: Preserve published originals
+on:
+  push:
+    branches: [preserve-original-videos]
+permissions:
+  contents: read
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preserve exact public files and content
+        run: python3 scripts/backup-published-originals.py
+      - name: Archive verified originals
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANCHOS-originals-2026-10-14
+          path: portfolio-backup/
+          retention-days: 90
+          compression-level: 0
+          if-no-files-found: error
