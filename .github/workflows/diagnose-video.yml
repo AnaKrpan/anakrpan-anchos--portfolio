@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Install metadata probe
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Inspect original video metadata and delivery
         shell: python
         run: |
