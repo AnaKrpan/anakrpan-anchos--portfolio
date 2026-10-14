@@ -59,3 +59,25 @@ jobs:
                 data,_=get(path,start,end)
                 if len(data)!=end-start+1: raise RuntimeError('Range truncated')
             except Exception as e: print('DIAGNOSIS_ERROR',type(e).__name__,str(e).split('?')[0][:180],flush=True)
+      - name: Verify complete original HERBOXA checksum and decode
+        shell: python
+        run: |
+          import urllib.request,json,hashlib,pathlib,subprocess,time
+          origin='https://anakrpan-anchos-potrfolio.netlify.app'
+          with urllib.request.urlopen(origin+'/api/content',timeout=30) as r: doc=json.loads(r.read())['document']
+          video=next(v for v in doc['videos'] if v.get('slot')=='2')
+          if not video.get('src'): raise RuntimeError('HERBOXA is not currently published')
+          path=pathlib.Path('/tmp/herboxa-original.mp4');digest=hashlib.sha256();size=0;t=time.monotonic()
+          with urllib.request.urlopen(origin+video['src'],timeout=90) as response, path.open('wb') as output:
+            while True:
+              block=response.read(4*1024*1024)
+              if not block: break
+              digest.update(block);size+=len(block);output.write(block)
+              if size>2*1024**3: raise RuntimeError('Unexpected video size')
+          print('HERBOXA_FULL_COPY',json.dumps({'bytes':size,'sha256':digest.hexdigest(),'seconds':round(time.monotonic()-t,3),'matchesEarlierOriginal':size==135400217 and digest.hexdigest()=='88c303a242ff95d2a78851ae798e3944cf17a9a1265d50223fbf0a7a444c93be'}),flush=True)
+          p=subprocess.run(['ffprobe','-v','error','-show_streams','-of','json',str(path)],capture_output=True,text=True,timeout=30)
+          streams=json.loads(p.stdout).get('streams',[])
+          print('FULL_CODEC',json.dumps([{k:s[k] for k in ['codec_type','codec_name','profile','pix_fmt','level','width','height','r_frame_rate','duration','bit_rate','nb_frames'] if k in s} for s in streams]),flush=True)
+          p=subprocess.run(['ffmpeg','-hide_banner','-v','error','-xerror','-i',str(path),'-map','0:v:0','-f','null','-'],capture_output=True,text=True,timeout=180)
+          print('DECODE_RESULT',json.dumps({'exitCode':p.returncode,'error':p.stderr[:800]}),flush=True)
+          if p.returncode: raise RuntimeError('Original video decode failed')
