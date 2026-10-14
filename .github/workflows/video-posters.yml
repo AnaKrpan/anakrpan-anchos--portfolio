@@ -1,7 +1,7 @@
 name: Prepare video cover images
 on:
   push:
-    branches: [video-cover-images]
+    branches: [exact-first-frame-covers]
     paths: ['.github/workflows/video-posters.yml']
 permissions:
   contents: write
@@ -12,18 +12,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: video-cover-images
+          ref: exact-first-frame-covers
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Extract cover images from verified public videos
         shell: python
         run: |
-          import pathlib,json,subprocess
+          import pathlib,json,subprocess,urllib.request
           copies=json.loads(pathlib.Path('public/viewing-videos/verification.json').read_text())
           posters={}
           for src,copy in copies.items():
             video=pathlib.Path('public'+copy['url'])
-            poster=video.with_suffix('.jpg')
-            subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-ss','1','-i',str(video),'-vf','thumbnail=60,scale=540:-2','-frames:v','1','-q:v','2',str(poster)],check=True,timeout=60)
+            poster=video.with_name(video.stem+'-first-frame.jpg')
+            with urllib.request.urlopen(urllib.request.Request('https://anakrpan-anchos-potrfolio.netlify.app'+src+'?original=1',headers={'Range':'bytes=0-31'}),timeout=30) as r:
+                source=r.geturl()
+                r.read(32)
+            result=subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',source,'-vf',r'select=eq(n\,0),scale=540:-2','-frames:v','1','-q:v','2',str(poster)],capture_output=True,timeout=120)
+            if result.returncode: raise RuntimeError('First-frame extraction failed')
             assert poster.stat().st_size>1000
             posters[src]='/viewing-videos/'+poster.name
           pathlib.Path('public/video-posters.js').write_text('window.PortfolioPosters='+json.dumps(posters)+';\n')
@@ -32,6 +36,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add public/viewing-videos/*.jpg public/video-posters.js
-          git commit -m 'Add immediate cover images for all five published videos'
-          git push origin HEAD:video-cover-images
+          git add public/viewing-videos/*-first-frame.jpg public/video-posters.js
+          git commit -m 'Use exact frame zero from each original video as its cover'
+          git push origin HEAD:exact-first-frame-covers

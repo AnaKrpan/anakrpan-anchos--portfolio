@@ -25,7 +25,7 @@ for(const video of videos){
   assert.equal((await response.arrayBuffer()).byteLength,64);
   const copy=viewingCopies[video.src];
   if(copy){
-    assert(posters[video.src],'Published video has no cover');
+    assert(posters[video.src]?.endsWith('-first-frame.jpg'),'Published video has no exact first-frame cover');
     const poster=await fetchTimed(posters[video.src],{headers:{range:'bytes=0-2047'}});assert.equal(poster.status,206);
     assert.match(poster.headers.get('content-type'),/image\/jpeg/);
     const jpeg=new Uint8Array(await poster.arrayBuffer());assert(jpeg.length===2048&&jpeg[0]===255&&jpeg[1]===216);
