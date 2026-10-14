@@ -788,7 +788,25 @@ const TransportMD5 = (function (undefined) {
     const digest = await root.crypto.subtle.digest('SHA-256', bytes);
     return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
   }
-  function createUploader({ request, directRequest = (...args) => root.fetch(...args), storage: progressStorage = storage, report: defaultReport = () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), attempts = 4 }) {
+  function nativeDirectRequest(url,options) {
+    if(typeof root.XMLHttpRequest!=='function')return root.fetch(url,options);
+    return new Promise((resolve,reject)=>{
+      const xhr=new root.XMLHttpRequest();let idleTimer,finished=false;
+      const clean=()=>{clearTimeout(idleTimer);options.signal?.removeEventListener('abort',abort);};
+      const finish=(error,result)=>{if(finished)return;finished=true;clean();error?reject(error):resolve(result);};
+      const abort=()=>xhr.abort();
+      const active=()=>{clearTimeout(idleTimer);idleTimer=setTimeout(()=>{xhr.abort();},180000);};
+      xhr.open('PUT',url);xhr.withCredentials=false;
+      for(const [name,value] of Object.entries(options.headers || {}))xhr.setRequestHeader(name,value);
+      xhr.upload.onprogress=event=>{active();options.onProgress?.(event.loaded);};
+      xhr.onload=()=>{try{if(xhr.status<200)throw new Error('Prijenos nije potvrđen.');const etag=xhr.getResponseHeader('etag');finish(null,new root.Response(xhr.responseText||null,{status:xhr.status,headers:etag?{etag}:{}}));}catch(error){finish(error);}};
+      xhr.onerror=()=>finish(new Error('Veza s pohranom je prekinuta.'));
+      xhr.onabort=()=>finish(Object.assign(new Error('Prijenos je zastao; spremljeni dijelovi ostaju.'),{name:'AbortError'}));
+      if(options.signal?.aborted){finish(Object.assign(new Error('Prijenos je prekinut.'),{name:'AbortError'}));return;}
+      options.signal?.addEventListener('abort',abort,{once:true});active();xhr.send(options.body);
+    });
+  }
+  function createUploader({ request, directRequest = nativeDirectRequest, storage: progressStorage = storage, report: defaultReport = () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), attempts = 4 }) {
     let queue = Promise.resolve();
     const interrupted = new Set();
     async function reliable(path, options, report, stage, send = request, timeoutMs = 35000) {
@@ -816,6 +834,7 @@ const TransportMD5 = (function (undefined) {
         const persist = async state => { try { await progressStorage.set(key, state); } catch (_) {} };
         try {
           const created = await reliable('/api/media/start', { method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,size:file.size,fingerprint:key}) }, report, 'Početak prijenosa');
+          if(created.completedUrl){await progressStorage.remove(key).catch(()=>{});interrupted.delete(key);return {url:created.completedUrl};}
           if (created.direct) {
             const partSize=created.partSize;
             if (!Number.isInteger(partSize) || partSize < 5*1024*1024 || partSize > 16*1024*1024) throw new Error('Neispravna veličina dijela originala.');
@@ -826,22 +845,32 @@ const TransportMD5 = (function (undefined) {
             let sent=0;
             for (let offset=0,part=1;offset<file.size;offset+=partSize,part++) {
               const blob=file.slice(offset,offset+partSize), size=blob.size;
-              const checksum=root.btoa(TransportMD5.ArrayBuffer.hash(await blob.arrayBuffer(),true));
+              const body=await blob.arrayBuffer();
+              if(body.byteLength!==size)throw new Error('Mobitel nije vratio cijeli dio datoteke.');
+              const checksum=root.btoa(TransportMD5.ArrayBuffer.hash(body,true));
               const saved=receipts.get(part);
               // Server receipts are authoritative; do not resend confirmed parts.
               if (saved?.size !== size || saved?.checksum !== checksum) {
                 const sendPart=async (_path,options)=> {
-                  const signed=await request('/api/media/part-url',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id,part,checksum}),signal:options.signal});
+                  const grantController=new AbortController(),grantTimer=setTimeout(()=>grantController.abort(),35000);
+                  const cancelGrant=()=>grantController.abort();options.signal?.addEventListener('abort',cancelGrant,{once:true});
+                  let signed;
+                  try{signed=await request('/api/media/part-url',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:created.id,part,checksum}),signal:grantController.signal});}
+                  finally{clearTimeout(grantTimer);options.signal?.removeEventListener('abort',cancelGrant);}
                   const target=new URL(signed.url);
                   if (target.protocol !== 'https:' || !/^[a-f0-9]{32}\.r2\.cloudflarestorage\.com$/.test(target.hostname) || signed.headers?.['content-md5'] !== checksum) throw new Error('Odredište originala nije potvrđeno.');
-                  const response=await directRequest(signed.url,{method:'PUT',headers:signed.headers,body:blob,signal:options.signal,credentials:'omit',redirect:'error'});
+                  let previousProgress=-1;
+                  const response=await directRequest(signed.url,{method:'PUT',headers:signed.headers,body,signal:options.signal,credentials:'omit',redirect:'error',onProgress:loaded=>{
+                    const percent=Math.floor((sent+Math.min(size,loaded))/file.size*1000)/10;
+                    if(percent!==previousProgress){previousProgress=percent;report('Prenosim original: '+percent.toFixed(1)+' %. Spremanje još traje.');}
+                  }});
                   if (!response.ok) { await response.body?.cancel(); throw Object.assign(new Error('Prijenos originala nije potvrđen ('+response.status+').'),{status:response.status}); }
                   const etag=response.headers.get('etag');
                   await response.body?.cancel();
                   if (!etag) throw new Error('Pohrana nije vratila potvrdu dijela.');
                   return {partNumber:part,size,checksum,etag};
                 };
-                const receipt=await reliable('',{},report,'Izravni prijenos originala',sendPart,180000);
+                const receipt=await reliable('',{},report,'Izravni prijenos originala',sendPart,900000);
                 receipts.set(part,receipt);
               }
               sent+=size;
@@ -904,5 +933,5 @@ const TransportMD5 = (function (undefined) {
     }
     return { upload, hasInterrupted: () => interrupted.size > 0 };
   }
-  root.PortfolioUploads = { createUploader, fingerprint, storage };
+  root.PortfolioUploads = { createUploader, fingerprint, storage, nativeDirectRequest };
 })(typeof globalThis === 'undefined' ? window : globalThis);

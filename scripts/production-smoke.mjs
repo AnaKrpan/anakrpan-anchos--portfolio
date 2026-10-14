@@ -3,7 +3,7 @@ const origin='https://anakrpan-anchos-potrfolio.netlify.app';
 const fetchTimed=(path,options={})=>fetch(origin+path,{...options,signal:AbortSignal.timeout(20000)});
 let ready=false;
 for(let attempt=0;attempt<36;attempt++){
-  try { const response=await fetchTimed('/api/health');const health=await response.json();ready=response.ok&&health.ready===true&&health.build==='original-video-delivery-v3'&&health.originalStorageConfigured===true; } catch {}
+  try { const response=await fetchTimed('/api/health');const health=await response.json();ready=response.ok&&health.ready===true&&health.build==='original-video-delivery-v4'&&health.originalStorageConfigured===true; } catch {}
   if(ready)break;
   if(attempt<35)await new Promise(resolve=>setTimeout(resolve,10000));
 }

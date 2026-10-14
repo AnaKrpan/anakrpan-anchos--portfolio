@@ -2,7 +2,7 @@
 import { AwsClient } from './vendor/aws4fetch.js';
 
 export const ORIGINAL_PART_SIZE = 8 * 1024 * 1024;
-const safeKey = key => typeof key === 'string' && /^originals\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(key);
+const safeKey = key => typeof key === 'string' && /^(originals|playback)\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(key);
 const escapeXML = text => String(text).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&apos;' }[c]));
 const unescapeXML = text => text.replace(/&(amp|lt|gt|quot|apos);/g, (_, c) => ({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"}[c]));
 const field = (xml, name) => { const value = xml.match(new RegExp('<'+name+'>([^<]*)</'+name+'>')); return value ? unescapeXML(value[1]) : null; };
@@ -87,6 +87,19 @@ export function createOriginalStorage(config, {fetch: transport = globalThis.fet
       const result={size:Number(response.headers.get('content-length')),type:response.headers.get('content-type'),etag:response.headers.get('etag')};
       await response.body?.cancel();
       return result;
+    },
+    async copyPart(key,uploadId,partNumber,sourceKey,start,end) {
+      url(sourceKey);
+      if (!Number.isInteger(partNumber) || partNumber<1 || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start<0 || end<start) throw storageError('Neispravan raspon kopije.',400);
+      const response=await send(key,'PUT',{uploadId,partNumber},{headers:{'x-amz-copy-source':'/'+config.bucket+'/'+sourceKey,'x-amz-copy-source-range':'bytes='+start+'-'+end}});
+      const etag=field(await response.text(),'ETag');
+      if (!/^"?[a-f0-9]{32}"?$/.test(etag || '')) throw storageError('Kopija dijela nije potvrđena.');
+      return etag;
+    },
+    async readRange(key,start,end,total) {
+      const response=await send(key,'GET',{}, {headers:{range:'bytes='+start+'-'+end},timeout:180000});
+      if (response.status!==206 || response.headers.get('content-range')!=='bytes '+start+'-'+end+'/'+total) {await response.body?.cancel();throw storageError('Raspon izvornih bajtova nije potvrđen.');}
+      return response;
     },
     async read(key) { return send(key,'GET',{}, {timeout:180000}); }
   };

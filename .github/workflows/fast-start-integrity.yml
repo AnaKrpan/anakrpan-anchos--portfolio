@@ -1,0 +1,50 @@
+name: Verify lossless playback on a real original
+on:
+  push:
+    branches: [improve-original-playback]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install video inspector
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Read original HERBOXA without modifying the portfolio
+        shell: python
+        run: |
+          import urllib.request,json,pathlib,hashlib
+          origin='https://anakrpan-anchos-potrfolio.netlify.app'
+          with urllib.request.urlopen(origin+'/api/content',timeout=30) as r: doc=json.loads(r.read())['document']
+          video=next(v for v in doc['videos'] if v['slot']=='2')
+          if not video.get('src'): raise RuntimeError('Original validation video is not published')
+          digest=hashlib.sha256();size=0
+          with urllib.request.urlopen(origin+video['src']+'?original=1',timeout=90) as r, open('/tmp/herboxa-original.mp4','wb') as output:
+            while True:
+              data=r.read(4*1024*1024)
+              if not data: break
+              output.write(data);digest.update(data);size+=len(data)
+              if size>2*1024**3: raise RuntimeError('Unexpected source size')
+          print('ORIGINAL',size,digest.hexdigest())
+          assert size==135400217 and digest.hexdigest()=='88c303a242ff95d2a78851ae798e3944cf17a9a1265d50223fbf0a7a444c93be'
+      - name: Relocate metadata without encoding or changing size
+        run: node scripts/verify-fast-start-file.mjs /tmp/herboxa-original.mp4 /tmp/herboxa-fast-start.mp4
+      - name: Verify every video and audio packet plus full frame decoding
+        shell: python
+        run: |
+          import subprocess,json
+          def packets(path):
+            p=subprocess.run(['ffmpeg','-hide_banner','-v','error','-xerror','-i',path,'-map','0','-c','copy','-f','streamhash','-hash','sha256','-'],capture_output=True,text=True,timeout=120)
+            assert p.returncode==0,p.stderr[:500]
+            return p.stdout
+          original=packets('/tmp/herboxa-original.mp4');relocated=packets('/tmp/herboxa-fast-start.mp4')
+          assert original==relocated,'Encoded video or audio packets changed'
+          print('PACKET_SHA256',original.strip())
+          p=subprocess.run(['ffmpeg','-hide_banner','-v','error','-xerror','-i','/tmp/herboxa-fast-start.mp4','-map','0:v:0','-f','null','-'],capture_output=True,text=True,timeout=180)
+          assert p.returncode==0,p.stderr[:500]
+          print('LOSSLESS_PLAYBACK_VERIFIED',json.dumps({'sameEncodedVideoAndAudio':True,'allFramesDecoded':True,'sameFileSize':True,'originalRetained':True}))

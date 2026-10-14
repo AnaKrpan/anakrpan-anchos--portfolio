@@ -120,6 +120,9 @@ function safeTextHTML(value) {
 }
 let revision = 0, canEdit = false, dirty = false, serial = 0, saving = null, publishing=false, saveTimer;
 const photoEpochs = new WeakMap(), videoEpochs = new Map();
+const failedVideoSlots=new Set();
+const failedVideoNames=()=>Array.from(failedVideoSlots,slot=>document.querySelector('[data-video-slot="'+slot+'"] .card-label')?.textContent.trim()||slot).join(', ');
+let canPrepareOriginals=false;
 const globalNotice = document.querySelector('#online-notice');
 function markDirty() {
   dirty = true; serial++;
@@ -138,7 +141,7 @@ function setSaveButton() { exportButton.disabled = !!saving || publishing || pen
 async function saveChanges() {
   if (saving) return saving;
   if (!canEdit) return;
-  if (!dirty) { if (!pendingFiles) message('Sve izmjene su već spremljene na istoj adresi.'); return; }
+  if (!dirty) { if (!pendingFiles&&!failedVideoSlots.size) message('Sve izmjene su već spremljene na istoj adresi.'); return; }
   const savedSerial = serial;
   const snapshot = captureDraft();
   saving = (async () => {
@@ -154,7 +157,8 @@ async function saveChanges() {
       revision = data.revision;
       if (serial === savedSerial) dirty = false;
       document.querySelector('#draft-status').textContent = 'Privatni nacrt spremljen: ' + new Date(data.updatedAt).toLocaleTimeString('hr-HR') + '. Za javnu objavu klikni „Spremi i objavi”.';
-      if (!pendingFiles) message('Nacrt je spremljen. Posjetitelji vide prethodnu objavljenu verziju dok ne klikneš „Spremi i objavi”.');
+      if (!pendingFiles&&!failedVideoSlots.size) message('Nacrt je spremljen. Posjetitelji vide prethodnu objavljenu verziju dok ne klikneš „Spremi i objavi”.');
+      if(failedVideoSlots.size)document.querySelector('#draft-status').textContent='Nacrt je spremljen, ali prijenos nije uspio za: '+failedVideoNames()+'. Poruka greške ostaje ispod tog videa.';
       return true;
     } catch (error) {
       message(error.message + ' Nemoj zatvoriti ovu karticu dok spremanje ne uspije.');
@@ -190,6 +194,7 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
     const file = event.target.files[0]; event.target.value=''; if (!file) return;
     if (!PortfolioFiles.acceptsVideo(file)) { message('Odaberi video datoteku.'); return; }
     const epoch=(videoEpochs.get(slot)||0)+1; videoEpochs.set(slot,epoch);
+    failedVideoSlots.delete(slot);
     pendingFiles++; setSaveButton();
     try {
       const byExt={mp4:'video/mp4',mov:'video/quicktime',webm:'video/webm',m4v:'video/x-m4v',ogv:'video/ogg'};
@@ -198,8 +203,10 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
       if (videoEpochs.get(slot)!==epoch) return;
       video.pause(); video.src=result.url; video.hidden=false; video.load(); card.querySelector('.video-placeholder').hidden=true;
       card.dataset.mediaName=file.name; markDirty(); const saved = await saveChanges();
+      failedVideoSlots.delete(slot);
       progress.textContent = saved === true && !dirty ? 'Video i nacrt su spremljeni. Klikni „Spremi i objavi”.' : 'Video je prenesen, ali nacrt još nije spremljen. Klikni „Spremi i objavi” i pričekaj potvrdu.';
-    } catch (error) { report(error.message+' Prethodni video i ostale izmjene su zadržani.'); }
+      if(saved===true&&canPrepareOriginals)requestJSON('/api/originals/migrate',{method:'POST'}).catch(()=>{});
+    } catch (error) { failedVideoSlots.add(slot); report(error.message+' Prethodni video i ostale izmjene su zadržani.'); }
     finally { pendingFiles--; setSaveButton(); if (dirty && !pendingFiles) saveChanges(); }
   });
   card.querySelector('.remove-video').addEventListener('click',() => {
@@ -207,9 +214,13 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
     video.pause(); video.removeAttribute('src'); video.load(); video.hidden=true;
     card.querySelector('.video-placeholder').hidden=false; delete card.dataset.mediaName; markDirty();
   });
-  video.addEventListener('play',() => document.querySelectorAll('video').forEach(other => {if(other!==video)other.pause();}));
-  video.addEventListener('error',() => {if(editing)message('Preglednik ne može reproducirati ovaj video. Pokušaj MP4 s H.264 kodiranjem. Spremljeni tekst nije obrisan.');});
+  video.addEventListener('play',() => {video.preload='auto';document.querySelectorAll('video').forEach(other => {if(other!==video){other.pause();other.preload='none';}});});
+  video.addEventListener('error',() => {if(editing&&!failedVideoSlots.size)message('Pregled videa se nije pokrenuo. Spremljena datoteka i tekst ostaju sačuvani.');});
 });
+if('IntersectionObserver' in window){
+  const nearVideos=new IntersectionObserver(entries=>{for(const entry of entries){const video=entry.target.querySelector('video');if(entry.isIntersecting&&video.paused)video.preload='metadata';}},{rootMargin:'100px'});
+  document.querySelectorAll('[data-video-slot]').forEach(card=>nearVideos.observe(card));
+}else document.querySelectorAll('video').forEach(video=>video.preload='metadata');
 function applyDocument(doc) {
   PortfolioCollaborations.restore(doc.collaborations);
   document.title=doc.title; document.querySelector('meta[name="description"]').content=doc.description;
@@ -236,7 +247,7 @@ exportButton.addEventListener('click',async () => {
   publishing=true;setSaveButton();
   try{
     const result=await requestJSON('/api/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({revision})});
-    message('Objavljeno! Svatko tko otvori tvoj javni link vidi ove izmjene.');
+    message(failedVideoSlots.size?'Spremljene izmjene su objavljene, ali prijenos nije uspio za: '+failedVideoNames()+'.':'Objavljeno! Svatko tko otvori tvoj javni link vidi ove izmjene.');
     document.querySelector('#draft-status').textContent='Objavljeno: '+new Date(result.updatedAt).toLocaleTimeString('hr-HR')+'. Link ostaje isti.';
   }catch(error){message(error.message+' Tvoj nacrt je zadržan.');}
   finally{publishing=false;setSaveButton();}
@@ -249,6 +260,7 @@ const draftReady = (async () => {
     const [session,content]=await Promise.all([requestJSON('/api/session'),requestJSON(location.pathname==='/uredi'?'/api/draft':'/api/content')]);
     if(content.document)applyDocument(content.document);
     revision=content.revision;canEdit=session.canEdit;
+    canPrepareOriginals=!!session.canPrepareOriginals;
     document.querySelector('#start-edit').hidden=!canEdit;
     document.querySelector('#owner-signin').hidden=canEdit;
     globalNotice.hidden=true; setSaveButton();
@@ -262,7 +274,7 @@ const draftReady = (async () => {
           try{
             const progress=await requestJSON('/api/originals/status');
             if(progress.verified===progress.total){
-              message('Svi postojeći originali su preneseni i provjereni. Javni link i sadržaj ostaju isti.');
+              message('Svi postojeći originali su provjereni i pripremljeni za gledanje. Javni link i sadržaj ostaju isti.');
               document.querySelectorAll('video').forEach(video=>{if(video.paused && video.getAttribute('src'))video.load();});
               return;
             }

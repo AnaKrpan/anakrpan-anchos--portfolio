@@ -113,7 +113,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
     try {
       if (path === '/api/health' && request.method === 'GET') {
         await store.getMetadata('state', { consistency: 'strong' });
-        return json({ ready: true, build: 'original-video-delivery-v3', originalStorageConfigured:!!originals });
+        return json({ ready: true, build: 'original-video-delivery-v4', originalStorageConfigured:!!originals });
       }
       if (path === '/uredi' && ['GET', 'HEAD'].includes(request.method)) {
         const destination = await authorized(request) ? '/index.html' : '/prijava.html';
@@ -143,7 +143,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         const state=await get('state');
         const files=[...new Set([...(state?.draft?.document?.videos || []),...(state?.published?.document?.videos || [])].map(v=>v.src).filter(src=>src.startsWith('/media/')))];
         const manifests=await Promise.all(files.map(src=>get('media/'+src.slice(7))));
-        return json({canEdit,migrationNeeded:manifests.some(m=>m?.type?.startsWith('video/') && m.backend!=='r2')});
+        return json({canEdit,canPrepareOriginals:true,migrationNeeded:manifests.some(m=>m?.type?.startsWith('video/') && (m.backend!=='r2'||m.type==='video/mp4'&&!m.playback?.ready))});
       }
       if (path === '/api/originals/migrate' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
@@ -159,8 +159,9 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         const state=await get('state');
         const files=[...new Set([...(state?.draft?.document?.videos || []),...(state?.published?.document?.videos || [])].map(v=>v.src).filter(src=>/^\/media\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(src)))];
         const progress=await Promise.all(files.map(async src=>{
-          const file=src.slice(7),manifest=await get('media/'+file),job=await get('original-migrations/'+file);
-          return {status:manifest?.backend==='r2'?'verified':job?.status || 'waiting',bytes:manifest?.size || 0,copiedBytes:manifest?.backend==='r2'?manifest.size:job?.copiedBytes || 0};
+          const file=src.slice(7),manifest=await get('media/'+file),job=await get('original-migrations/'+file),playback=await get('playback-preparations/'+file);
+          const ready=manifest?.backend==='r2'&&(manifest.type!=='video/mp4'||manifest.playback?.ready);
+          return {status:ready?'verified':playback?.status||job?.status || 'waiting',bytes:manifest?.size || 0,copiedBytes:ready?manifest.size:playback?.copiedBytes||job?.copiedBytes || 0};
         }));
         return json({total:progress.length,verified:progress.filter(p=>p.status==='verified').length,paused:progress.some(p=>p.status==='paused'),copiedBytes:progress.reduce((n,p)=>n+p.copiedBytes,0),totalBytes:progress.reduce((n,p)=>n+p.bytes,0)});
       }
@@ -244,7 +245,11 @@ export function createPortfolio({ store, password, initialDocument, originals = 
           if (existing) {
             const session = await get(uploadKey(existing.id));
             if (session && now() - session.createdAt <= UPLOAD_TTL && session.size === data.size && session.type === data.type) {
-              return json({ id: session.id, partSize: session.partSize || LEGACY_PART_SIZE, verifyBatch: 8, resumed: true, direct: session.backend === 'r2' });
+              const completed=await get('media/'+session.file);
+              if(completed)return json({id:session.id,completedUrl:'/media/'+session.file,resumed:true,direct:completed.backend==='r2'});
+              // Preserve every old part while moving unfinished legacy uploads
+              // off the Edge transfer path when direct storage is available.
+              if(!originals||!data.type.startsWith('video/')||session.backend==='r2')return json({ id: session.id, partSize: session.partSize || LEGACY_PART_SIZE, verifyBatch: 8, resumed: true, direct: session.backend === 'r2' });
             }
           }
         }
@@ -374,7 +379,8 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         const manifest = await get('media/' + path.slice(7));
         if (!manifest) fail(404, 'Datoteka ne postoji.');
         if (manifest.backend === 'r2' && originals) {
-          return new Response(null,{status:307,headers:{location:await originals.signedURL(manifest.objectKey,request.method), 'cache-control':'no-store','referrer-policy':'no-referrer'}});
+          const key=url.searchParams.get('original')==='1'?manifest.objectKey:manifest.playback?.ready?manifest.playback.key:manifest.objectKey;
+          return new Response(null,{status:307,headers:{location:await originals.signedURL(key,request.method,{},visible?21600:1800), 'cache-control':'no-store','referrer-policy':'no-referrer'}});
         }
         if (manifest.backend === 'r2' && !manifest.legacy) fail(503,'Izravna pohrana originala nije povezana.');
         // Migrated originals retain the old chunk manifest for emergency fallback.
