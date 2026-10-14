@@ -12,6 +12,8 @@ assert(ready,'The repaired production deployment is not available yet.');
 const home=await fetchTimed('/');assert.equal(home.status,200);const homeHTML=await home.text();assert.match(homeHTML,/upload-tools\.js/);assert.match(homeHTML,/video-posters\.js/);
 const posterScript=await fetchTimed('/video-posters.js');assert.equal(posterScript.status,200);
 const posters=JSON.parse((await posterScript.text()).replace(/^window\.PortfolioPosters=/,'').replace(/;\s*$/,''));
+const loadingScript=await fetchTimed('/video-loading.js');assert.equal(loadingScript.status,200);
+assert.match(await loadingScript.text(),/addEventListener\('pageshow',resetPageVideos\)/);
 const session=await fetchTimed('/api/session');assert.equal((await session.json()).canEdit,false);
 assert.equal((await fetchTimed('/api/draft')).status,401);
 const contentResponse=await fetchTimed('/api/content');assert.equal(contentResponse.status,200);

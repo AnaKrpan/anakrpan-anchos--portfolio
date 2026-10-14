@@ -1,7 +1,7 @@
 name: Portfolio checks
 on:
   push:
-    branches: [main, repair-video-storage, original-video-delivery, improve-original-playback, mobile-video-copies, reduce-resource-usage]
+    branches: [main, repair-video-storage, original-video-delivery, improve-original-playback, mobile-video-copies, reduce-resource-usage, reset-video-posters]
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,12 +17,12 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Install browser for mobile and desktop loading checks
-        if: github.ref == 'refs/heads/reduce-resource-usage'
+        if: github.ref == 'refs/heads/reduce-resource-usage' || github.ref == 'refs/heads/reset-video-posters'
         run: |
           npm install --no-save --ignore-scripts --no-audit --no-fund playwright@1.56.1
           npx playwright install --with-deps chromium
       - name: Confirm no video requests before an explicit click and preserve draft sources
-        if: github.ref == 'refs/heads/reduce-resource-usage'
+        if: github.ref == 'refs/heads/reduce-resource-usage' || github.ref == 'refs/heads/reset-video-posters'
         run: node scripts/check-lazy-video-browser.mjs
   production:
     if: github.ref == 'refs/heads/main'

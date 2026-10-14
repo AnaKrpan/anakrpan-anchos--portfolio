@@ -35,6 +35,12 @@ try{
     await page.locator('[data-video-slot="1"] .video-start').click();await page.waitForTimeout(500);
     assert.deepEqual(media,[Object.keys(copies)[0]],'Only the explicitly selected video may request data');
     const after=await page.evaluate(()=>captureDraft());assert.deepEqual(after.videos.map(v=>v.src),before.draft.videos.map(v=>v.src));
+    await page.evaluate(()=>{document.querySelector('video').currentTime=17;window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));});
+    const restored=await page.evaluate(()=>[...document.querySelectorAll('video')].map(v=>({src:v.getAttribute('src'),time:v.currentTime,poster:v.poster,paused:v.paused,button:v.parentElement.querySelector('.video-start').hidden})));
+    assert(restored.every(v=>!v.src&&v.time===0&&v.poster&&v.paused&&!v.button),'Restored page must show posters at the beginning without loading video');
+    await page.reload();await page.waitForFunction(()=>document.querySelector('video').dataset.mediaSrc);
+    assert.equal(media.length,1,'Reload must not fetch any video');
+    assert(await page.evaluate(()=>[...document.querySelectorAll('video')].every(v=>!v.getAttribute('src')&&v.currentTime===0&&v.poster)));
     console.log(JSON.stringify({viewport,initialVideoRequests:0,scrollVideoRequests:0,clickedVideoRequests:media.length,unplayedVideosPreservedInDraft:true}));
     await page.close();
   }
