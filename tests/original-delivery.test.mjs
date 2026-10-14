@@ -7,6 +7,7 @@ import {createPortfolio} from '../netlify/edge-functions/lib/server.js';
 import initialDocument from '../netlify/edge-functions/lib/initial-document.js';
 import {createOriginalStorage,originalStorageConfig,ORIGINAL_PART_SIZE} from '../netlify/edge-functions/lib/original-storage.js';
 import {migrateOriginal} from '../netlify/edge-functions/lib/migrate-originals.js';
+import SparkMD5 from '../netlify/edge-functions/lib/vendor/spark-md5.js';
 
 class Store {
   values=new Map(); counter=0; deletes=0;
@@ -22,11 +23,11 @@ function storageFixture() {
     async start(key,type){uploads.set(key,{type,parts:new Map()});return 'upload';},
     async list(key){return [...uploads.get(key).parts.values()].map(p=>({...p,bytes:undefined})).sort((a,b)=>a.partNumber-b.partNumber);},
     async head(key){const o=objects.get(key);return o?{size:o.bytes.length,type:o.type}:null;},
-    async partURL(key,id,part,checksum){return {url:'https://'+'a'.repeat(32)+'.r2.cloudflarestorage.com/test/'+key+'?part='+part,headers:{'x-amz-checksum-sha256':checksum}};},
+    async partURL(key,id,part,checksum){return {url:'https://'+'a'.repeat(32)+'.r2.cloudflarestorage.com/test/'+key+'?part='+part,headers:{'content-md5':checksum}};},
     async complete(key,id,parts){const u=uploads.get(key);objects.set(key,{type:u.type,bytes:new Uint8Array(Buffer.concat(parts.map(p=>Buffer.from(u.parts.get(p.partNumber).bytes))))});},
     async read(key){return new Response(objects.get(key).bytes);},
     async signedURL(key,method){return 'https://'+'a'.repeat(32)+'.r2.cloudflarestorage.com/test/'+key+'?method='+method;},
-    async put(url,options){const target=new URL(url),key=target.pathname.slice('/test/'.length),part=Number(target.searchParams.get('part'));const bytes=new Uint8Array(await new Response(options.body).arrayBuffer());const checksum=createHash('sha256').update(bytes).digest('base64');assert.equal(checksum,options.headers['x-amz-checksum-sha256']);const receipt={partNumber:part,size:bytes.length,checksum,etag:'"'+'a'.repeat(32)+'"',bytes};uploads.get(key).parts.set(part,receipt);return new Response(null,{headers:{etag:receipt.etag}});}
+    async put(url,options){const target=new URL(url),key=target.pathname.slice('/test/'.length),part=Number(target.searchParams.get('part'));const bytes=new Uint8Array(await new Response(options.body).arrayBuffer());const checksum=createHash('md5').update(bytes).digest('base64');assert.equal(checksum,options.headers['content-md5']);const receipt={partNumber:part,size:bytes.length,checksum,etag:'"'+'a'.repeat(32)+'"',bytes};uploads.get(key).parts.set(part,receipt);return new Response(null,{headers:{etag:receipt.etag}});}
   };
 }
 async function seed(store,bytes) {
@@ -93,23 +94,23 @@ test('browser direct upload sends unchanged bytes and resumes after lost browser
   const manifest=await store.get('media/'+result.url.slice(7));assert.equal(manifest.backend,'r2');assert.deepEqual(originals.objects.get(manifest.objectKey).bytes,new Uint8Array(await file.arrayBuffer()));
 });
 
-test('configured R2 signing binds upload to one object, part and SHA-256 without exposing secret',async()=>{
+test('configured R2 signing binds upload to one object, part and Content-MD5 without exposing secret',async()=>{
   const config={accountId:'a'.repeat(32),bucket:'anchos-originals',accessKeyId:'test-access',secretAccessKey:'test-secret'};
   const originals=createOriginalStorage(config,{now:()=>new Date('2026-10-14T00:00:00Z')});
-  const key='originals/'+crypto.randomUUID()+'.mp4',checksum=createHash('sha256').update('original').digest('base64');
+  const key='originals/'+crypto.randomUUID()+'.mp4',checksum=createHash('md5').update('original').digest('base64');
   const result=await originals.partURL(key,'upload-id',2,checksum);const url=new URL(result.url);
-  assert.equal(url.searchParams.get('partNumber'),'2');assert.equal(url.searchParams.get('uploadId'),'upload-id');assert.equal(url.searchParams.get('X-Amz-Expires'),'1800');assert.match(url.searchParams.get('X-Amz-SignedHeaders'),/x-amz-checksum-sha256/);assert(!result.url.includes('test-secret'));
+  assert.equal(url.searchParams.get('partNumber'),'2');assert.equal(url.searchParams.get('uploadId'),'upload-id');assert.equal(url.searchParams.get('X-Amz-Expires'),'1800');assert.match(url.searchParams.get('X-Amz-SignedHeaders'),/content-md5/);assert(!result.url.includes('test-secret'));
   await assert.rejects(originals.signedURL('../outside.mp4'),/putanja/);
   assert.equal(originalStorageConfig(()=>undefined),null);
   assert.throws(()=>originalStorageConfig(name=>name==='ORIGINAL_VIDEO_STORAGE'?'r2':undefined),/povezana/);
 });
 
-test('storage HTTP 200 completion errors and missing original checksums are rejected',async()=>{
+test('storage HTTP 200 completion errors and malformed original checksums are rejected',async()=>{
   const config={accountId:'a'.repeat(32),bucket:'anchos-originals',accessKeyId:'test-access',secretAccessKey:'test-secret'};
   const key='originals/'+crypto.randomUUID()+'.mp4';
   const errors=createOriginalStorage(config,{fetch:async()=>new Response('<Error><Code>InvalidPart</Code></Error>')});
   await assert.rejects(errors.complete(key,'upload',[]),/potvrđen/);
-  const incomplete=createOriginalStorage(config,{fetch:async()=>new Response('<ListPartsResult><Part><PartNumber>1</PartNumber><Size>5</Size><ETag>"'+ 'a'.repeat(32)+'"</ETag></Part></ListPartsResult>')});
+  const incomplete=createOriginalStorage(config,{fetch:async()=>new Response('<ListPartsResult><Part><PartNumber>1</PartNumber><Size>5</Size><ETag>"'+ 'a'.repeat(32)+'-2"</ETag></Part></ListPartsResult>')});
   await assert.rejects(incomplete.list(key,'upload'),/izvornih bajtova/);
 });
 
@@ -141,4 +142,25 @@ test('owner storage probe verifies full original bytes and ranges without modify
   const result=await app.fetch(new Request(url,{method:'POST',headers:{cookie,origin:'https://site.test'}}));assert.equal(result.status,200);assert.equal((await result.json()).verified,true);
   assert.deepEqual(await store.get('state'),seeded.state);assert.deepEqual(await store.get('media/'+seeded.file),seeded.manifest);assert.equal(store.deletes,0);
   assert(await store.get('original-storage-checks/site.test'));
+});
+
+test('transport MD5 matches the independent Node implementation at block boundaries and video chunk size',()=>{
+  for(const length of [0,1,55,56,63,64,65,127,128,65536,ORIGINAL_PART_SIZE]) {
+    const bytes=Uint8Array.from({length},(_,i)=>i%251);
+    assert.equal(SparkMD5.ArrayBuffer.hash(bytes.buffer),createHash('md5').update(bytes).digest('hex'));
+  }
+});
+
+test('real adapter uses supported R2 part checksums and derives resume receipts from MD5 ETags',async()=>{
+  const config={accountId:'a'.repeat(32),bucket:'ugcoriginals',accessKeyId:'test-access',secretAccessKey:'test-secret'};
+  const expected=createHash('md5').update('original').digest('hex');
+  const originals=createOriginalStorage(config,{fetch:async request=>{
+    assert.equal(request.headers.has('x-amz-checksum-algorithm'),false);
+    if(request.method==='POST')return new Response('<InitiateMultipartUploadResult><UploadId>test</UploadId></InitiateMultipartUploadResult>');
+    return new Response('<ListPartsResult><Part><PartNumber>1</PartNumber><Size>8</Size><ETag>"'+expected+'"</ETag></Part></ListPartsResult>');
+  }});
+  const key='originals/'+crypto.randomUUID()+'.mp4';
+  await originals.start(key,'video/mp4');
+  const parts=await originals.list(key,'test');assert.equal(parts[0].checksum,createHash('md5').update('original').digest('base64'));
+  const signed=await originals.partURL(key,'test',1,parts[0].checksum);assert.deepEqual(signed.headers,{'content-md5':parts[0].checksum});assert.match(new URL(signed.url).searchParams.get('X-Amz-SignedHeaders'),/content-md5/);
 });

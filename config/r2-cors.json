@@ -2,7 +2,7 @@
   {
     "AllowedOrigins": ["https://anakrpan-anchos-potrfolio.netlify.app"],
     "AllowedMethods": ["GET", "HEAD", "PUT"],
-    "AllowedHeaders": ["Content-Type", "Range", "x-amz-checksum-sha256"],
+    "AllowedHeaders": ["Content-Type", "Range", "Content-MD5"],
     "ExposeHeaders": ["ETag", "Content-Range", "Accept-Ranges", "Content-Length", "x-amz-checksum-sha256"],
     "MaxAgeSeconds": 3600
   }

@@ -52,7 +52,7 @@ export async function migrateOriginal({store,originals,file,now=()=>Date.now(),d
         }
       }
       sourceHash.update(chunk);
-      const checksum=createHash('sha256').update(chunk).digest('base64');
+      const checksum=createHash('md5').update(chunk).digest('base64');
       const stored=receipts.get(part);
       if (!head && (stored?.size!==size || stored?.checksum!==checksum)) {
         const signed=await originals.partURL(job.objectKey,job.uploadId,part,checksum);

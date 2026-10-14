@@ -41,7 +41,7 @@ export function createOriginalStorage(config, {fetch: transport = globalThis.fet
   return {
     signedURL,
     async start(key,type) {
-      const response = await send(key,'POST',{uploads:''},{headers:{'content-type':type,'cache-control':'private,max-age=1800','x-amz-checksum-algorithm':'SHA256'}});
+      const response = await send(key,'POST',{uploads:''},{headers:{'content-type':type,'cache-control':'private,max-age=1800'}});
       const uploadId = field(await response.text(),'UploadId');
       if (!uploadId || uploadId.length > 2048) throw storageError('Nedostaje potvrda početka pohrane.');
       return uploadId;
@@ -55,8 +55,11 @@ export function createOriginalStorage(config, {fetch: transport = globalThis.fet
         for (const match of xml.matchAll(/<Part>([\s\S]*?)<\/Part>/g)) {
           const partNumber=Number(field(match[1],'PartNumber')), size=Number(field(match[1],'Size')), etag=field(match[1],'ETag');
           if (!Number.isInteger(partNumber) || partNumber<1 || !Number.isSafeInteger(size) || size<1 || !/^"?[a-f0-9]{32}(?:-\d+)?"?$/.test(etag || '')) throw storageError('Neispravna potvrda spremljenog dijela.');
-          const checksum=field(match[1],'ChecksumSHA256');
-          if (!/^[A-Za-z0-9+/]{43}=$/.test(checksum || '')) throw storageError('Nedostaje potvrda izvornih bajtova.');
+          // R2 multipart part ETags are the part's MD5. Match them against the
+          // signed Content-MD5, which R2 validates during UploadPart.
+          const md5=etag.replace(/"/g,'');
+          if (!/^[a-f0-9]{32}$/.test(md5)) throw storageError('Nedostaje potvrda izvornih bajtova.');
+          const checksum=btoa(String.fromCharCode(...Uint8Array.from(md5.match(/../g),x=>parseInt(x,16))));
           receipts.push({partNumber,size,etag,checksum});
         }
         if (field(xml,'IsTruncated') !== 'true') return receipts.sort((a,b)=>a.partNumber-b.partNumber);
@@ -67,12 +70,12 @@ export function createOriginalStorage(config, {fetch: transport = globalThis.fet
       throw storageError('Previše dijelova originala.');
     },
     async partURL(key,uploadId,partNumber,checksum) {
-      if (!Number.isInteger(partNumber) || partNumber < 1 || !/^[A-Za-z0-9+/]{43}=$/.test(checksum || '')) throw storageError('Nedostaje provjera originalnih bajtova.',400);
-      const headers={'x-amz-checksum-sha256':checksum};
+      if (!Number.isInteger(partNumber) || partNumber < 1 || !/^[A-Za-z0-9+/]{22}==$/.test(checksum || '')) throw storageError('Nedostaje provjera originalnih bajtova.',400);
+      const headers={'content-md5':checksum};
       return {url:await signedURL(key,'PUT',{uploadId,partNumber},1800,headers),headers};
     },
     async complete(key,uploadId,receipts) {
-      const body='<CompleteMultipartUpload>'+receipts.map(part=>'<Part><PartNumber>'+part.partNumber+'</PartNumber><ETag>'+escapeXML(part.etag)+'</ETag><ChecksumSHA256>'+escapeXML(part.checksum)+'</ChecksumSHA256></Part>').join('')+'</CompleteMultipartUpload>';
+      const body='<CompleteMultipartUpload>'+receipts.map(part=>'<Part><PartNumber>'+part.partNumber+'</PartNumber><ETag>'+escapeXML(part.etag)+'</ETag></Part>').join('')+'</CompleteMultipartUpload>';
       const response=await send(key,'POST',{uploadId},{headers:{'content-type':'application/xml'},body});
       const xml=await response.text();
       // S3 can return a completion error with HTTP 200.

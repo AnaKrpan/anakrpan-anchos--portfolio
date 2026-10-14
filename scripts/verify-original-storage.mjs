@@ -11,7 +11,7 @@ const bytes=randomBytes(ORIGINAL_PART_SIZE+97);
 const uploadId=await originals.start(key,'video/mp4');
 for(let offset=0,part=1;offset<bytes.length;offset+=ORIGINAL_PART_SIZE,part++) {
   const body=bytes.subarray(offset,offset+ORIGINAL_PART_SIZE);
-  const checksum=createHash('sha256').update(body).digest('base64');
+  const checksum=createHash('md5').update(body).digest('base64');
   const signed=await originals.partURL(key,uploadId,part,checksum);
   const response=await fetch(signed.url,{method:'PUT',headers:signed.headers,body,signal:AbortSignal.timeout(120000),redirect:'error'});
   await response.body?.cancel();assert(response.ok,'Storage rejected checksum-bound original test bytes.');

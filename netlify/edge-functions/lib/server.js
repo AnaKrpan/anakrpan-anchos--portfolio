@@ -1,4 +1,5 @@
 import { ORIGINAL_PART_SIZE } from './original-storage.js';
+import SparkMD5 from './vendor/spark-md5.js';
 const PART_SIZE = 512 * 1024;
 const LEGACY_PART_SIZE = 2 * 1024 * 1024;
 const MAX_SIZE = 2 * 1024 * 1024 * 1024;
@@ -159,13 +160,17 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         // Isolated 64 KiB test object. Never touches any portfolio reference.
         const bytes=Uint8Array.from({length:65536},(_,i)=>i%251);
         const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
-        const checksum=btoa(String.fromCharCode(...digest));
+        const checksum=btoa(SparkMD5.ArrayBuffer.hash(bytes.buffer,true));
         const key='originals/'+crypto.randomUUID()+'.mp4';
         const uploadId=await originals.start(key,'video/mp4');
         const signedPart=await originals.partURL(key,uploadId,1,checksum);
         const uploaded=await dispatch(signedPart.url,{method:'PUT',headers:signedPart.headers,body:bytes,signal:AbortSignal.timeout(25000),redirect:'error'});
+        if (!uploaded.ok) {
+          const errorXML=await uploaded.text();
+          const code=errorXML.match(/<Code>([A-Za-z0-9_-]{1,80})<\/Code>/)?.[1];
+          fail(503,'Probni prijenos nije potvrđen ('+uploaded.status+(code?', '+code:'')+').');
+        }
         await uploaded.body?.cancel();
-        if (!uploaded.ok) fail(503,'Probni prijenos nije potvrđen ('+uploaded.status+').');
         const parts=await originals.list(key,uploadId);
         if (parts.length!==1 || parts[0].size!==bytes.length || parts[0].checksum!==checksum) fail(503,'Probni original nije potvrđen u pohrani.');
         await originals.complete(key,uploadId,parts);
