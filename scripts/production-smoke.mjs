@@ -10,7 +10,9 @@ for(let attempt=0;attempt<36;attempt++){
   if(attempt<35)await new Promise(resolve=>setTimeout(resolve,10000));
 }
 assert(ready,'The repaired production deployment is not available yet.');
-const home=await fetchTimed('/');assert.equal(home.status,200);assert.match(await home.text(),/upload-tools\.js/);
+const home=await fetchTimed('/');assert.equal(home.status,200);const homeHTML=await home.text();assert.match(homeHTML,/upload-tools\.js/);assert.match(homeHTML,/video-posters\.js/);
+const posterScript=await fetchTimed('/video-posters.js');assert.equal(posterScript.status,200);
+const posters=JSON.parse((await posterScript.text()).replace(/^window\.PortfolioPosters=/,'').replace(/;\s*$/,''));
 const session=await fetchTimed('/api/session');assert.equal((await session.json()).canEdit,false);
 assert.equal((await fetchTimed('/api/draft')).status,401);
 const contentResponse=await fetchTimed('/api/content');assert.equal(contentResponse.status,200);
@@ -22,6 +24,10 @@ for(const video of videos){
   assert.equal((await response.arrayBuffer()).byteLength,64);
   const copy=viewingCopies[video.src];
   if(copy){
+    assert(posters[video.src],'Published video has no cover');
+    const poster=await fetchTimed(posters[video.src]);assert.equal(poster.status,200);
+    assert.match(poster.headers.get('content-type'),/image\/jpeg/);
+    const jpeg=new Uint8Array(await poster.arrayBuffer());assert(jpeg.length>1000&&jpeg[0]===255&&jpeg[1]===216);
     assert.equal(new URL(response.url).pathname,copy.url);
     assert.equal(response.headers.get('content-range'),'bytes 0-63/'+copy.size);
     const full=await fetchTimed(copy.url);assert.equal(full.status,200);
