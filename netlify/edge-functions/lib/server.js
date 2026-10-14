@@ -1,6 +1,6 @@
 import { ORIGINAL_PART_SIZE } from './original-storage.js';
 import SparkMD5 from './vendor/spark-md5.js';
-import viewingCopies from './viewing-copies.js';
+import bundledViewingCopies from './viewing-copies.js';
 const PART_SIZE = 512 * 1024;
 const LEGACY_PART_SIZE = 2 * 1024 * 1024;
 const MAX_SIZE = 2 * 1024 * 1024 * 1024;
@@ -61,7 +61,7 @@ function uploadKey(id) {
   return 'uploads/' + id;
 }
 const partKey = (id, part) => 'parts/' + id + '/' + part;
-export function createPortfolio({ store, password, initialDocument, originals = null, migrationEnabled = false, dispatch = globalThis.fetch, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
+export function createPortfolio({ store, password, initialDocument, originals = null, viewingCopies = bundledViewingCopies, migrationEnabled = false, dispatch = globalThis.fetch, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
   const get = (key, type = 'json') => store.get(key, { type, consistency: 'strong' });
   const entry = (key, type = 'json') => store.getWithMetadata(key, { type, consistency: 'strong' });
   const emptyState = () => ({ draft: null, published: null });

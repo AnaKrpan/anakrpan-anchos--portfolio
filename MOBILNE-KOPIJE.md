@@ -1,0 +1,5 @@
+Objavljeni videi dobivaju zasebne kopije za gledanje: H.264, najviše 1080 × 1920, 30 fps, CRF 23, najveća video brzina 4 Mbit/s, AAC 128 kbit/s i MP4 metadata na početku. Ove kopije imaju manju rezoluciju i gubitnu kompresiju, uz izričito odobrenje vlasnice. Puni 4K originali ostaju netaknuti u R2 i dostupni dodavanjem `?original=1` postojećoj adresi `/media/...`.
+
+Priprema obrađuje samo trenutačno javno objavljene izvore. Izračunava SHA-256 originala, provjerava trajanje, format, rezoluciju i sve dekodirane sličice novih kopija. Ne mijenja dokument portfolija, privatne nacrte, tekstove, fotografije ili dizajn. Kopije su statičke MP4 datoteke u istom Netlify projektu, s podrškom za byte ranges. Preusmjeravanje se primjenjuje samo na iste UUID izvore i potvrđene izvorne veličine; nove ili privatne snimke nisu javno kopirane ovim postupkom.
+
+Provjera nakon objave preuzima svaku kopiju, uspoređuje SHA-256, potvrđuje početnu metadata i byte ranges te provjerava dostupnost punih originala. Glatka reprodukcija na svakom uređaju ipak ovisi o vezi i uređaju; potrebna je završna provjera na mobitelu.

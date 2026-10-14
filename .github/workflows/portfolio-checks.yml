@@ -1,7 +1,7 @@
 name: Portfolio checks
 on:
   push:
-    branches: [main, repair-video-storage, original-video-delivery, improve-original-playback]
+    branches: [main, repair-video-storage, original-video-delivery, improve-original-playback, mobile-video-copies]
   workflow_dispatch:
 permissions:
   contents: read
