@@ -1,0 +1,244 @@
+const PART_SIZE = 2 * 1024 * 1024;
+const MAX_SIZE = 512 * 1024 * 1024;
+const COOKIE = '__Host-anchos-owner';
+const SESSION_SECONDS = 8 * 60 * 60;
+const encoder = new TextEncoder();
+const TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'video/ogg': 'ogv', 'video/x-m4v': 'm4v' };
+const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json;charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...extra } });
+function fail(status, message) { const error = new Error(message); error.status = status; throw error; }
+const hex = bytes => Array.from(new Uint8Array(bytes), x => x.toString(16).padStart(2, '0')).join('');
+const hash = async value => hex(await crypto.subtle.digest('SHA-256', value));
+async function limitedBody(request, max) {
+  const reader = request.body?.getReader();
+  if (!reader) fail(400, 'Nedostaju podaci.');
+  let size = 0; const chunks = [];
+  while (true) {
+    const { value, done } = await reader.read(); if (done) break;
+    size += value.length;
+    if (size > max) { await reader.cancel(); fail(413, 'Podaci su preveliki.'); }
+    chunks.push(value);
+  }
+  const output = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.length; }
+  return output;
+}
+async function readJSON(request, max = 2 * 1024 * 1024) {
+  const bytes = await limitedBody(request, max);
+  try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { fail(400, 'Neispravni podaci.'); }
+}
+function sameOrigin(request) {
+  if (request.headers.get('origin') !== new URL(request.url).origin) fail(403, 'Spremanje je dopušteno samo s ove stranice.');
+}
+function sourceOK(src) {
+  return typeof src === 'string' && (/^\/media\/[a-f0-9-]{36}\.(jpg|png|webp|mp4|mov|m4v|webm|ogv)$/.test(src) || /^assets\/[a-zA-Z0-9_-]+\.(webp|jpg|png)$/.test(src));
+}
+export function validateDocument(doc) {
+  if (!doc || !Array.isArray(doc.texts) || !Array.isArray(doc.photos) || !Array.isArray(doc.videos)) fail(400, 'Nedostaje sadržaj portfolija.');
+  if (doc.texts.length > 200 || doc.photos.length > 30 || doc.videos.length !== 5) fail(400, 'Neispravan broj elemenata.');
+  for (const text of [...doc.texts, doc.title, doc.description, doc.email, doc.phone]) if (typeof text !== 'string' || text.length > 20000) fail(400, 'Neispravan tekst.');
+  for (const photo of doc.photos) if (!photo || !sourceOK(photo.src) || typeof photo.alt !== 'string' || photo.alt.length > 1000) fail(400, 'Fotografija nije spremljena.');
+  const slots = new Set();
+  for (const video of doc.videos) {
+    if (!video || !['1', '2', '3', '4', '5'].includes(video.slot) || slots.has(video.slot)) fail(400, 'Neispravna mjesta za videe.');
+    slots.add(video.slot);
+    if (typeof video.src !== 'string' || (video.src && !sourceOK(video.src)) || (!video.src && video.present)) fail(400, 'Video nije spremljen.');
+  }
+  const value = doc.collaborations;
+  if (value !== undefined) {
+    if (!value || !Array.isArray(value.items) || value.items.length > 100 || !value.labels) fail(400, 'Neispravne suradnje.');
+    for (const item of value.items) if (!item || typeof item.brand !== 'string' || item.brand.length > 500 || typeof item.comment !== 'string' || item.comment.length > 10000) fail(400, 'Neispravan komentar.');
+    for (const key of ['eyebrow', 'heading', 'caption']) if (typeof value.labels[key] !== 'string' || value.labels[key].length > 1000) fail(400, 'Neispravan naslov suradnji.');
+  }
+  if (!Array.isArray(doc.colors) || doc.colors.length !== 3 || doc.colors.some(c => !/^#[0-9a-f]{6}$/i.test(c))) fail(400, 'Neispravne boje.');
+}
+function uploadKey(id) {
+  if (!/^[a-f0-9-]{36}$/.test(id || '')) fail(400, 'Neispravno učitavanje.');
+  return 'uploads/' + id;
+}
+const partKey = (id, part) => 'parts/' + id + '/' + part;
+export function createPortfolio({ store, password, initialDocument, now = () => Date.now() }) {
+  const get = (key, type = 'json') => store.get(key, { type, consistency: 'strong' });
+  const entry = (key, type = 'json') => store.getWithMetadata(key, { type, consistency: 'strong' });
+  const emptyState = () => ({ draft: null, published: null });
+  async function signed(value) {
+    const key = await crypto.subtle.importKey('raw', encoder.encode(password), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+    return hex(await crypto.subtle.sign('HMAC', key, encoder.encode(value)));
+  }
+  async function matches(value, signature) {
+    if (!/^[a-f0-9]{64}$/.test(signature || '')) return false;
+    const key = await crypto.subtle.importKey('raw', encoder.encode(password), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    const bytes = Uint8Array.from(signature.match(/../g), x => parseInt(x, 16));
+    return crypto.subtle.verify('HMAC', key, bytes, encoder.encode(value));
+  }
+  async function authorized(request) {
+    if (password.length < 16) return false;
+    const value = request.headers.get('cookie')?.split(';').map(x => x.trim()).find(x => x.startsWith(COOKIE + '='))?.slice(COOKIE.length + 1);
+    if (!value) return false;
+    const [expiry, nonce, signature, ...extra] = value.split('.');
+    const expiration = Number(expiry);
+    if (extra.length || !Number.isSafeInteger(expiration) || expiration <= now() || expiration > now() + SESSION_SECONDS * 1000 || !/^[a-f0-9-]{36}$/.test(nonce)) return false;
+    return matches('session:' + expiry + '.' + nonce + ':' + new URL(request.url).host, signature);
+  }
+  async function owner(request) { if (!await authorized(request)) fail(401, 'Prijavi se za uređivanje portfolija.'); }
+  async function mutateState(previous, value) {
+    const result = await store.setJSON('state', value, previous ? { onlyIfMatch: previous.etag } : { onlyIfNew: true });
+    if (!result.modified) fail(409, 'Postoji noviji nacrt. Tvoje izmjene su zadržane u ovoj kartici.');
+  }
+  async function uploadSession(id) {
+    const result = await get(uploadKey(id));
+    if (!result || now() - result.createdAt > 24 * 60 * 60 * 1000) fail(410, 'Učitavanje je isteklo. Ponovno odaberi datoteku.');
+    return result;
+  }
+  async function loginLimit(ip) {
+    const key = 'login-rate/' + await signed('ip:' + (ip || 'unknown'));
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const old = await entry(key);
+      const counter = !old || now() - old.data.since >= 10 * 60 * 1000 ? { since: now(), count: 0 } : old.data;
+      if (counter.count >= 10) fail(429, 'Previše pokušaja. Pokušaj ponovno za 10 minuta.');
+      const result = await store.setJSON(key, { ...counter, count: counter.count + 1 }, old ? { onlyIfMatch: old.etag } : { onlyIfNew: true });
+      if (result.modified) return;
+    }
+    fail(429, 'Pokušaj ponovno za nekoliko trenutaka.');
+  }
+  return { async fetch(request, context = {}) {
+    const url = new URL(request.url), path = url.pathname;
+    try {
+      if (path === '/uredi' && ['GET', 'HEAD'].includes(request.method)) {
+        const destination = await authorized(request) ? '/index.html' : '/prijava.html';
+        if (destination === '/prijava.html') return Response.redirect(url.origin + destination, 302);
+        if (!context.rewrite) fail(503, 'Pregled uređivanja nije dostupan.');
+        const response = await context.rewrite(destination);
+        const headers = new Headers(response.headers); headers.set('cache-control', 'no-store');
+        return new Response(response.body, { status: response.status, headers });
+      }
+      if (path === '/api/login' && request.method === 'POST') {
+        sameOrigin(request);
+        if (password.length < 16) fail(503, 'Uređivanje još nije aktivirano. Vlasnica treba postaviti lozinku u Netlifyju.');
+        await loginLimit(context.ip);
+        const data = await readJSON(request, 4096);
+        if (typeof data.password !== 'string' || data.password.length > 1024 || !await matches('password:' + data.password, await signed('password:' + password))) fail(401, 'Lozinka nije ispravna.');
+        const value = String(now() + SESSION_SECONDS * 1000) + '.' + crypto.randomUUID();
+        const token = value + '.' + await signed('session:' + value + ':' + url.host);
+        return json({ signedIn: true }, 200, { 'set-cookie': COOKIE + '=' + token + '; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=' + SESSION_SECONDS });
+      }
+      if (path === '/api/logout' && request.method === 'POST') {
+        sameOrigin(request);
+        return json({ signedOut: true }, 200, { 'set-cookie': COOKIE + '=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0' });
+      }
+      if (path === '/api/session' && request.method === 'GET') return json({ canEdit: await authorized(request) });
+      if (path === '/api/content' && request.method === 'GET') {
+        const state = await get('state');
+        return json(state?.published || { document: initialDocument, revision: 0 });
+      }
+      if (path === '/api/draft') {
+        await owner(request);
+        const previous = await entry('state'), state = previous?.data || emptyState();
+        if (request.method === 'GET') return json(state.draft || { document: state.published?.document || initialDocument, revision: 0 });
+        if (request.method !== 'PUT') fail(405, 'Nedopušten postupak.');
+        sameOrigin(request);
+        const data = await readJSON(request); validateDocument(data.document);
+        if (!Number.isSafeInteger(data.revision) || data.revision < 0 || (state.draft?.revision || 0) !== data.revision) fail(409, 'Postoji noviji nacrt. Nemoj zatvoriti ovu karticu.');
+        const updatedAt = new Date(now()).toISOString(), revision = data.revision + 1;
+        await mutateState(previous, { ...state, draft: { document: data.document, revision, updatedAt } });
+        return json({ saved: true, revision, updatedAt });
+      }
+      if (path === '/api/publish' && request.method === 'POST') {
+        sameOrigin(request); await owner(request);
+        const data = await readJSON(request, 4096), previous = await entry('state'), state = previous?.data;
+        if (!state?.draft || !Number.isSafeInteger(data.revision) || state.draft.revision !== data.revision) fail(409, 'Nacrt je promijenjen. Spremi ga pa ponovno objavi.');
+        const doc = state.draft.document;
+        const files = [...doc.photos.map(p => p.src), ...doc.videos.map(v => v.src)].filter(src => src.startsWith('/media/'));
+        for (const src of new Set(files)) if (!await get('media/' + src.slice(7))) fail(400, 'Jedna datoteka nije učitana. Objavljena verzija je zadržana.');
+        const updatedAt = new Date(now()).toISOString();
+        await mutateState(previous, { ...state, published: { ...state.draft, updatedAt } });
+        return json({ published: true, revision: data.revision, updatedAt });
+      }
+      if (path === '/api/media/start' && request.method === 'POST') {
+        sameOrigin(request); await owner(request);
+        const data = await readJSON(request, 4096), ext = TYPES[data.type];
+        if (!ext || !Number.isSafeInteger(data.size) || data.size < 1 || data.size > MAX_SIZE) fail(400, 'Odaberi fotografiju ili video do 512 MB.');
+        const id = crypto.randomUUID();
+        await store.setJSON(uploadKey(id), { id, file: id + '.' + ext, type: data.type, size: data.size, createdAt: now() });
+        return json({ id, partSize: PART_SIZE });
+      }
+      if (path === '/api/media/part' && request.method === 'PUT') {
+        sameOrigin(request); await owner(request);
+        const id = url.searchParams.get('id'), session = await uploadSession(id), part = Number(url.searchParams.get('part'));
+        const count = Math.ceil(session.size / PART_SIZE);
+        if (!Number.isInteger(part) || part < 1 || part > count) fail(400, 'Neispravan dio datoteke.');
+        if (await get('media/' + session.file)) fail(409, 'Datoteka je već završena.');
+        const bytes = await limitedBody(request, PART_SIZE), expected = Math.min(PART_SIZE, session.size - (part - 1) * PART_SIZE);
+        if (bytes.length !== expected) fail(400, 'Dio datoteke nije učitan u cijelosti.');
+        const etag = await hash(bytes);
+        await store.set(partKey(id, part), bytes.buffer, { metadata: { size: bytes.length, digest: etag } });
+        return json({ partNumber: part, etag });
+      }
+      if (path === '/api/media/complete' && request.method === 'POST') {
+        sameOrigin(request); await owner(request);
+        const data = await readJSON(request, 65536), session = await uploadSession(data.id);
+        const count = Math.ceil(session.size / PART_SIZE);
+        if (!Array.isArray(data.parts) || data.parts.length !== count || data.parts.some((p, i) => !p || p.partNumber !== i + 1 || !/^[a-f0-9]{64}$/.test(p.etag || ''))) fail(400, 'Nedostaju dijelovi datoteke.');
+        for (let offset = 0; offset < data.parts.length; offset += 8) {
+          await Promise.all(data.parts.slice(offset, offset + 8).map(async part => {
+          const actual = await store.getMetadata(partKey(data.id, part.partNumber), { consistency: 'strong' });
+          const expected = Math.min(PART_SIZE, session.size - (part.partNumber - 1) * PART_SIZE);
+          if (!actual || actual.metadata.digest !== part.etag || actual.metadata.size !== expected) fail(400, 'Datoteka nije učitana u cijelosti.');
+          }));
+        }
+        await store.setJSON('media/' + session.file, { ...session, count }, { onlyIfNew: true });
+        return json({ url: '/media/' + session.file });
+      }
+      if (path === '/api/media/abort' && request.method === 'POST') {
+        sameOrigin(request); await owner(request);
+        const data = await readJSON(request, 4096), session = await uploadSession(data.id);
+        if (await get('media/' + session.file)) fail(409, 'Spremljenu datoteku nije moguće izbrisati ovim postupkom.');
+        for (let part = 1; part <= Math.ceil(session.size / PART_SIZE); part++) await store.delete(partKey(data.id, part));
+        await store.delete(uploadKey(data.id));
+        return json({ aborted: true });
+      }
+      if (path.startsWith('/media/') && ['GET', 'HEAD'].includes(request.method)) {
+        if (!sourceOK(path) || !path.startsWith('/media/')) fail(404, 'Datoteka ne postoji.');
+        const state = await get('state'), doc = state?.published?.document;
+        const visible = doc && (doc.photos.some(p => p.src === path) || doc.videos.some(v => v.src === path));
+        if (!visible) await owner(request);
+        const manifest = await get('media/' + path.slice(7));
+        if (!manifest) fail(404, 'Datoteka ne postoji.');
+        const headers = new Headers({ 'content-type': manifest.type, 'accept-ranges': 'bytes', 'cache-control': 'private,no-store', 'x-content-type-options': 'nosniff' });
+        let start = 0, end = manifest.size - 1, status = 200;
+        const range = request.method === 'GET' && request.headers.get('range');
+        if (range) {
+          const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+          if (!match || (!match[1] && !match[2])) return json({ error: 'Neispravan raspon.' }, 416, { 'content-range': 'bytes */' + manifest.size });
+          if (!match[1]) start = Math.max(0, manifest.size - Number(match[2]));
+          else { start = Number(match[1]); if (match[2]) end = Math.min(end, Number(match[2])); }
+          if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= manifest.size) return json({ error: 'Neispravan raspon.' }, 416, { 'content-range': 'bytes */' + manifest.size });
+          // Bounded ranges let mobile players seek without downloading the entire video.
+          end = Math.min(end, start + PART_SIZE - 1); status = 206;
+          headers.set('content-range', `bytes ${start}-${end}/${manifest.size}`);
+        }
+        headers.set('content-length', String(end - start + 1));
+        if (request.method === 'HEAD') return new Response(null, { headers });
+        let offset = start;
+        const body = new ReadableStream({
+          async pull(controller) {
+            try {
+              if (offset > end) { controller.close(); return; }
+              const part = Math.floor(offset / PART_SIZE) + 1;
+              const buffer = await get(partKey(manifest.id, part), 'arrayBuffer');
+              if (!buffer) throw new Error('Nedostaje dio datoteke.');
+              const bytes = new Uint8Array(buffer), within = offset % PART_SIZE, length = Math.min(bytes.length - within, end - offset + 1);
+              if (length < 1) throw new Error('Neispravna datoteka.');
+              controller.enqueue(bytes.subarray(within, within + length)); offset += length;
+              if (offset > end) controller.close();
+            } catch (error) { controller.error(error); }
+          }
+        });
+        return new Response(body, { status, headers });
+      }
+      return json({ error: 'Postupak ne postoji.' }, 404);
+    } catch (error) {
+      if (!error.status) console.error('Portfolio storage request failed:', path);
+      return json({ error: error.status ? error.message : 'Spremanje trenutno nije dostupno. Tvoje izmjene ostaju u otvorenoj stranici.' }, error.status || 503);
+    }
+  } };
+}

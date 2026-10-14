@@ -1,0 +1,30 @@
+[build]
+  command = "npm run build"
+  publish = "public"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[edge_functions]]
+  function = "portfolio"
+  path = "/api/*"
+
+[[edge_functions]]
+  function = "portfolio"
+  path = "/media/*"
+
+[[edge_functions]]
+  function = "portfolio"
+  path = "/uredi"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "same-origin"
+    X-Frame-Options = "DENY"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"

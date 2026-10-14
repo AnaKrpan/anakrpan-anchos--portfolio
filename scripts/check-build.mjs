@@ -1,0 +1,13 @@
+import { readFile, readdir } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import initial from '../netlify/edge-functions/lib/initial-document.js';
+const page = await readFile('public/index.html', 'utf8');
+assert.equal(initial.videos.length, 5);
+assert.equal(initial.photos.length, 7);
+assert.equal((page.match(/data-edit=""/g) || []).length, initial.texts.length);
+for (const photo of initial.photos) await readFile('public/' + photo.src);
+for (const file of ['online-script.js', 'photo-tools.js', 'collaboration-tools.js', 'media-tools.js', 'prijava.html']) await readFile('public/' + file);
+assert(!page.includes('signin-with-chatgpt'));
+assert(!page.includes('localStorage'));
+assert(!page.includes('Preuzmi promjene'));
+console.log('Portfolio je spreman: 5 mjesta za videe, 7 fotografija i privatno uređivanje.');
