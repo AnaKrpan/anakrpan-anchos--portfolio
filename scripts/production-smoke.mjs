@@ -5,11 +5,12 @@ const fetchTimed=(path,options={})=>fetch(origin+path,{...options,signal:AbortSi
 let ready=false;
 for(let attempt=0;attempt<36;attempt++){
   try { const response=await fetchTimed('/api/health');const health=await response.json();ready=response.ok&&health.ready===true&&health.build==='low-bandwidth-v6'&&health.viewingCopiesReady===true&&health.originalStorageConfigured===true; } catch {}
+  if(ready){try{const feature=await fetchTimed('/language.js');ready=feature.ok&&(await feature.text()).includes('PortfolioLanguage');}catch{ready=false;}}
   if(ready)break;
   if(attempt<35)await new Promise(resolve=>setTimeout(resolve,10000));
 }
 assert(ready,'The repaired production deployment is not available yet.');
-const home=await fetchTimed('/');assert.equal(home.status,200);const homeHTML=await home.text();assert.match(homeHTML,/upload-tools\.js/);assert.match(homeHTML,/video-posters\.js/);
+const home=await fetchTimed('/');assert.equal(home.status,200);const homeHTML=await home.text();assert.match(homeHTML,/upload-tools\.js/);assert.match(homeHTML,/video-posters\.js/);assert.match(homeHTML,/data-language="en"/);
 const posterScript=await fetchTimed('/video-posters.js');assert.equal(posterScript.status,200);
 const posters=JSON.parse((await posterScript.text()).replace(/^window\.PortfolioPosters=/,'').replace(/;\s*$/,''));
 const loadingScript=await fetchTimed('/video-loading.js');assert.equal(loadingScript.status,200);

@@ -98,6 +98,7 @@ dialog.addEventListener('click', event => {
 });
 dialog.addEventListener('close', () => document.body.classList.remove('dialog-open'));
 function captureDraft() {
+  if(window.PortfolioLanguage?.language==='en')return PortfolioLanguage.withCroatian(captureDraft);
   return {
     collaborations: PortfolioCollaborations.capture(),
     version: 2, updatedAt: Date.now(), title: document.title,
@@ -218,6 +219,7 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
   video.addEventListener('error',() => {if(editing&&!failedVideoSlots.size)message('Pregled videa se nije pokrenuo. Spremljena datoteka i tekst ostaju sačuvani.');});
 });
 function applyDocument(doc) {
+  window.PortfolioLanguage?.beforeDocument();
   PortfolioCollaborations.restore(doc.collaborations);
   document.title=doc.title; document.querySelector('meta[name="description"]').content=doc.description;
   document.querySelectorAll('[data-edit]').forEach((el,i) => {if(typeof doc.texts[i]==='string')el.innerHTML=safeTextHTML(doc.texts[i]);});
@@ -239,6 +241,7 @@ function applyDocument(doc) {
     else{PortfolioVideoLoading.controller(video).set('');card.querySelector('.video-placeholder').hidden=false;}
     card.dataset.mediaName=state.name||'';
   }
+  window.PortfolioLanguage?.afterDocument();
 }
 exportButton.addEventListener('click',async () => {
   if(pendingFiles || publishing)return;

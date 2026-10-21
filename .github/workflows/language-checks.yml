@@ -16,3 +16,16 @@ jobs:
           with urllib.request.urlopen('https://anakrpan-anchos-potrfolio.netlify.app/api/content',timeout=30) as r: data=json.load(r)
           pathlib.Path('/tmp/anchos-language-content.json').write_text(json.dumps(data))
           print('CURRENT_PUBLIC_DOCUMENT',json.dumps(data,ensure_ascii=False))
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm test && npm run build
+      - name: Install isolated browser
+        run: |
+          npm install --no-save --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Check language switching, exact Croatian restoration, videos and editing
+        run: node scripts/check-language-browser.mjs
+      - name: Recheck lazy video loading, covers, reload and back navigation
+        run: node scripts/check-lazy-video-browser.mjs
