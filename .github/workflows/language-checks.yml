@@ -1,0 +1,18 @@
+name: Check English portfolio option
+on:
+  push:
+    branches: [add-english-language]
+permissions:
+  contents: read
+jobs:
+  language:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read current public content without changing it
+        shell: python
+        run: |
+          import json,urllib.request,pathlib
+          with urllib.request.urlopen('https://anakrpan-anchos-potrfolio.netlify.app/api/content',timeout=30) as r: data=json.load(r)
+          pathlib.Path('/tmp/anchos-language-content.json').write_text(json.dumps(data))
+          print('CURRENT_PUBLIC_DOCUMENT',json.dumps(data,ensure_ascii=False))
