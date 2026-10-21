@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import viewingCopies from '../netlify/edge-functions/lib/viewing-copies.js';
 const origin='https://anakrpan-anchos-potrfolio.netlify.app';
 const fetchTimed=(path,options={})=>fetch(origin+path,{...options,signal:AbortSignal.timeout(20000)});
@@ -19,6 +20,8 @@ const session=await fetchTimed('/api/session');assert.equal((await session.json(
 assert.equal((await fetchTimed('/api/draft')).status,401);
 const contentResponse=await fetchTimed('/api/content');assert.equal(contentResponse.status,200);
 const {document:doc}=await contentResponse.json();assert.equal(doc.videos.length,5);assert(Array.isArray(doc.texts));
+const croatianBaseline=JSON.parse(await readFile(new URL('../tests/fixtures/language-content.json',import.meta.url),'utf8'));
+assert.deepEqual(doc,croatianBaseline.document,'The stored Croatian public document changed during the language rollout');
 const videos=doc.videos.filter(video=>video.src?.startsWith('/media/'));
 for(const video of videos){
   const response=await fetchTimed(video.src,{headers:{range:'bytes=0-63'}});
