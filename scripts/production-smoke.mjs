@@ -6,7 +6,7 @@ const fetchTimed=(path,options={})=>fetch(origin+path,{...options,signal:AbortSi
 let ready=false;
 for(let attempt=0;attempt<36;attempt++){
   try { const response=await fetchTimed('/api/health');const health=await response.json();ready=response.ok&&health.ready===true&&health.build==='low-bandwidth-v6'&&health.viewingCopiesReady===true&&health.originalStorageConfigured===true; } catch {}
-  if(ready){try{const feature=await fetchTimed('/language.js');ready=feature.ok&&(await feature.text()).includes('PortfolioLanguage');}catch{ready=false;}}
+  if(ready){try{const feature=await fetchTimed('/language.js');const script=await feature.text();ready=feature.ok&&script.includes('PortfolioLanguage')&&script.includes('replace(/([.!?])');}catch{ready=false;}}
   if(ready)break;
   if(attempt<35)await new Promise(resolve=>setTimeout(resolve,10000));
 }
