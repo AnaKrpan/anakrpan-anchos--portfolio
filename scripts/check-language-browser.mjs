@@ -65,7 +65,7 @@ try{
     assert.equal(await page.locator('html').getAttribute('lang'),'en');assert.match(await page.locator('.intro-copy').innerText(),/understanding a brand/);
     const galleryEnglish=await page.locator('.gallery-item .card-label span').first().innerText();
     await page.locator('.gallery-item').first().click();assert.equal(await page.locator('#image-dialog').isVisible(),true);assert.equal(await page.locator('#dialog-title').innerText(),galleryEnglish);
-    await page.evaluate(()=>PortfolioLanguage.setLanguage('hr'));assert.equal(await page.locator('#dialog-title').innerHTML,hr.texts[33]);await page.locator('#close-dialog').click();
+    await page.evaluate(()=>PortfolioLanguage.setLanguage('hr'));assert.equal(await page.locator('#dialog-title').innerHTML(),hr.texts[33]);await page.locator('#close-dialog').click();
     await page.locator('[data-video-slot="1"] .video-start').click();await page.waitForTimeout(100);
     await page.evaluate(()=>{document.querySelector('video').currentTime=17;});const selected=await snapshot(page);
     await page.evaluate(()=>PortfolioLanguage.setLanguage('en'));assert.deepEqual((await snapshot(page)).media,selected.media,'Changing language must not restart or reload a video');
