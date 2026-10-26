@@ -51,12 +51,21 @@ try{
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'English layout must fit the viewport');
       await page.getByRole('button',{name:'Hrvatski',exact:true}).click();assert.deepEqual(await snapshot(page),hr,'Croatian content and every media source must return exactly');
     }
+    for(const paragraph of [data.document.texts[13].replace('. Zato','.Zato'),data.document.texts[13].replace('. Zato','.\n\nZato'),data.document.texts[13].replace('. Zato','.<br>Zato')]){
+      await page.evaluate(({doc,paragraph})=>{doc.texts[13]=paragraph;applyDocument(doc);PortfolioLanguage.setLanguage('en');},{doc:structuredClone(data.document),paragraph});
+      assert.match(await page.locator('.intro-copy').innerText(),/I believe great content begins with understanding a brand/,'Equivalent sentence spacing must not disable translation');
+      await page.evaluate(()=>PortfolioLanguage.setLanguage('hr'));
+    }
+    await page.evaluate(doc=>applyDocument(doc),data.document);
+    assert.deepEqual(await snapshot(page),hr,'Formatting regression checks must preserve current Croatian content');
+    assert.equal(await page.evaluate(()=>PortfolioLanguage.hasTranslation('Ovo je potpuno nov tekst o drugoj temi.')),false,'Changed words must not use an unrelated translation');
     assert.equal(requests.length,baselineRequests,'Switching languages must not make API or video requests');
     assert(!requests.some(r=>r.method!=='GET'),'Language selection must never write to the server');
     await page.goto(origin+'/?lang=en');await page.waitForFunction(()=>document.querySelector('video').dataset.mediaSrc);
     assert.equal(await page.locator('html').getAttribute('lang'),'en');assert.match(await page.locator('.intro-copy').innerText(),/understanding a brand/);
-    await page.locator('.gallery-item').first().click();assert.equal(await page.locator('#image-dialog').isVisible(),true);assert.equal(await page.locator('#dialog-title').innerText(),'Everyday life');
-    await page.evaluate(()=>PortfolioLanguage.setLanguage('hr'));assert.equal(await page.locator('#dialog-title').innerText(),'Svakodnevica');await page.locator('#close-dialog').click();
+    const galleryEnglish=await page.locator('.gallery-item .card-label span').first().innerText();
+    await page.locator('.gallery-item').first().click();assert.equal(await page.locator('#image-dialog').isVisible(),true);assert.equal(await page.locator('#dialog-title').innerText(),galleryEnglish);
+    await page.evaluate(()=>PortfolioLanguage.setLanguage('hr'));assert.equal(await page.locator('#dialog-title').innerHTML,hr.texts[33]);await page.locator('#close-dialog').click();
     await page.locator('[data-video-slot="1"] .video-start').click();await page.waitForTimeout(100);
     await page.evaluate(()=>{document.querySelector('video').currentTime=17;});const selected=await snapshot(page);
     await page.evaluate(()=>PortfolioLanguage.setLanguage('en'));assert.deepEqual((await snapshot(page)).media,selected.media,'Changing language must not restart or reload a video');

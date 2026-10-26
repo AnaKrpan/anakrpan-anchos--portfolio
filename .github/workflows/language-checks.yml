@@ -1,7 +1,7 @@
 name: Check English portfolio option
 on:
   push:
-    branches: [add-english-language]
+    branches: [add-english-language, fix-paragraph-translation]
 permissions:
   contents: read
 jobs:

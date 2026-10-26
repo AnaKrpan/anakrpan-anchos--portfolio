@@ -558,5 +558,21 @@ window.PortfolioEnglishTranslations=[
   [
     "Jako sam zadovoljna videom! Bravo, bravo 👍👏👏\n\nOmjer dijeljenja i pregleda je 34.5%\nI ja sam sada to vidjela i baš sam iznenađena i jako mi je drago. Puno ljudi vas podržava na vašem putu što nije čest slučaj. Bravo za vas i samo nastavite tako ❤️\n",
     "I’m very happy with the video! Well done, well done 👍👏👏\n\nThe share-to-view ratio is 34.5%.\nI’ve just seen that too, and I’m really surprised and very happy. So many people are supporting you on your journey, which isn’t something you see often. Well done, and keep it up ❤️\n"
+  ],
+  [
+    "Luido Pet Gear",
+    "Luido Pet Gear"
+  ],
+  [
+    "Flova",
+    "Flova"
+  ],
+  [
+    "Snowmonkey",
+    "Snowmonkey"
+  ],
+  [
+    "Pero",
+    "Pero"
   ]
 ];

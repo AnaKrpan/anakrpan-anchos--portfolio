@@ -3,7 +3,7 @@
   if(!group)return;
   const editingPage=location.pathname==='/uredi';
   group.hidden=editingPage;
-  const normalise=value=>{const template=document.createElement('template');template.innerHTML=String(value);return template.content.textContent.replace(/\s+/g,' ').trim();};
+  const normalise=value=>{const template=document.createElement('template');template.innerHTML=String(value);return template.content.textContent.replace(/\s+/g,' ').replace(/([.!?])\s*/g,'$1 ').trim();};
   const translations=new Map((root.PortfolioEnglishTranslations||[]).filter(([hr])=>normalise(hr)).map(([hr,en])=>[normalise(hr),en]));
   const translate=value=>translations.get(normalise(value));
   let language=!editingPage&&new URL(location.href).searchParams.get('lang')==='en'?'en':'hr';
