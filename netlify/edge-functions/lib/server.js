@@ -1,3 +1,5 @@
+import '../../../public/project-model.js';
+const ProjectModel=globalThis.PortfolioProjectModel;
 import { ORIGINAL_PART_SIZE } from './original-storage.js';
 import SparkMD5 from './vendor/spark-md5.js';
 import bundledViewingCopies from './viewing-copies.js';
@@ -39,6 +41,7 @@ function sourceOK(src) {
 }
 export function validateDocument(doc) {
   if (!doc || !Array.isArray(doc.texts) || !Array.isArray(doc.photos) || !Array.isArray(doc.videos)) fail(400, 'Nedostaje sadržaj portfolija.');
+  ProjectModel.validate(doc);
   if (doc.texts.length > 200 || doc.photos.length > 30 || doc.videos.length !== 5) fail(400, 'Neispravan broj elemenata.');
   for (const text of [...doc.texts, doc.title, doc.description, doc.email, doc.phone]) if (typeof text !== 'string' || text.length > 20000) fail(400, 'Neispravan tekst.');
   for (const photo of doc.photos) if (!photo || !sourceOK(photo.src) || typeof photo.alt !== 'string' || photo.alt.length > 1000) fail(400, 'Fotografija nije spremljena.');
@@ -61,10 +64,19 @@ function uploadKey(id) {
   return 'uploads/' + id;
 }
 const partKey = (id, part) => 'parts/' + id + '/' + part;
-export function createPortfolio({ store, password, initialDocument, originals = null, viewingCopies = bundledViewingCopies, migrationEnabled = false, dispatch = globalThis.fetch, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
+export function createPortfolio({ store, password, initialDocument, originals = null, viewingCopies = bundledViewingCopies, migrationEnabled = false, projectsEnabled = false, directUploads = true, sandbox = false, dispatch = globalThis.fetch, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
   const get = (key, type = 'json') => store.get(key, { type, consistency: 'strong' });
   const entry = (key, type = 'json') => store.getWithMetadata(key, { type, consistency: 'strong' });
   const emptyState = () => ({ draft: null, published: null });
+  const upgraded=doc=>projectsEnabled?ProjectModel.upgrade(doc):doc;
+  const publicDoc=doc=>ProjectModel.publicDocument(upgraded(doc));
+  async function checkFiles(doc){for(const src of ProjectModel.refs(doc))if(!await get('media/'+src.slice(7)))fail(400,'Jedna datoteka još nije dovršena.');}
+  async function checkReview(project){
+    if(project.legacySlot||!['published','comingSoon'].includes(project.status))return;
+    const digest=await hash(encoder.encode(ProjectModel.reviewPayload(project)));
+    if(project.reviewed?.digest!==digest||!['hr','en'].every(lang=>project.reviewed?.languages?.includes(lang)))fail(400,'Prije objave pregledaj ovu verziju projekta na hrvatskom i engleskom.');
+  }
+
   async function ensureViewingCopies(urlOrigin){
     if(!migrationEnabled||!originals||!Object.keys(viewingCopies).length)return;
     const jobKey='viewing-copy-bootstrap/v1',previous=await entry(jobKey);
@@ -156,7 +168,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         const canEdit=await authorized(request);
         if (!canEdit || !originals || !migrationEnabled) return json({canEdit});
         const state=await get('state');
-        const files=[...new Set([...(state?.draft?.document?.videos || []),...(state?.published?.document?.videos || [])].map(v=>v.src).filter(src=>src.startsWith('/media/')))];
+        const files=[...new Set([...ProjectModel.refs(state?.draft?.document),...ProjectModel.refs(state?.published?.document)].filter(src=>src.startsWith('/media/')))];
         const manifests=await Promise.all(files.map(src=>get('media/'+src.slice(7))));
         return json({canEdit,canPrepareOriginals:true,migrationNeeded:manifests.some((m,i)=>m?.type?.startsWith('video/') && !viewingCopies[files[i]] && (m.backend!=='r2'||m.type==='video/mp4'&&!m.playback?.ready))});
       }
@@ -172,7 +184,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
       if (path === '/api/originals/status' && request.method === 'GET') {
         await owner(request);
         const state=await get('state');
-        const files=[...new Set([...(state?.draft?.document?.videos || []),...(state?.published?.document?.videos || [])].map(v=>v.src).filter(src=>/^\/media\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(src)))];
+        const files=[...new Set([...ProjectModel.refs(state?.draft?.document),...ProjectModel.refs(state?.published?.document)].filter(src=>/^\/media\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(src)))];
         const progress=await Promise.all(files.map(async src=>{
           const file=src.slice(7),manifest=await get('media/'+file),job=await get('original-migrations/'+file),playback=await get('playback-preparations/'+file);
           const ready=manifest?.backend==='r2'&&(manifest.type!=='video/mp4'||manifest.playback?.ready);
@@ -223,29 +235,47 @@ export function createPortfolio({ store, password, initialDocument, originals = 
       }
       if (path === '/api/content' && request.method === 'GET') {
         const state = await get('state');
-        return json({...state?.published || { document: initialDocument, revision: 0 },canEdit:await authorized(request)});
+        return json({...state?.published || {revision:0},document:publicDoc(state?.published?.document||initialDocument),canEdit:await authorized(request),sandbox});
       }
       if (path === '/api/draft') {
         await owner(request);
         const previous = await entry('state'), state = previous?.data || emptyState();
-        if (request.method === 'GET') return json(state.draft || { document: state.published?.document || initialDocument, revision: 0 });
+        if (request.method === 'GET') return json({...state.draft||{revision:0},document:upgraded(state.draft?.document||state.published?.document||initialDocument),sandbox});
         if (request.method !== 'PUT') fail(405, 'Nedopušten postupak.');
         sameOrigin(request);
         const data = await readJSON(request); validateDocument(data.document);
+        if(state.draft?.document?.projects&&!data.document.projects)fail(409,'Osvježi uređivanje: stara verzija ne može prepisati nove projekte.');
         if (!Number.isSafeInteger(data.revision) || data.revision < 0 || (state.draft?.revision || 0) !== data.revision) fail(409, 'Postoji noviji nacrt. Nemoj zatvoriti ovu karticu.');
         const updatedAt = new Date(now()).toISOString(), revision = data.revision + 1;
         await mutateState(previous, { ...state, draft: { document: data.document, revision, updatedAt } });
         return json({ saved: true, revision, updatedAt });
+      }
+      if(path==='/api/projects/publish'&&request.method==='POST'){
+        sameOrigin(request);await owner(request);
+        const data=await readJSON(request,4096),previous=await entry('state'),state=previous?.data;
+        if(!state?.draft||state.draft.revision!==data.revision)fail(409,'Nacrt je promijenjen. Spremi ga prije objave.');
+        const draft=upgraded(state.draft.document),project=draft.projects?.find(p=>p.id===data.id);
+        if(!project||!['published','comingSoon','archived'].includes(project.status))fail(400,'Odaberi Gotov rad ili Uskoro prije objave.');
+        const doc=upgraded(state.published?.document||initialDocument);
+        doc.projects=doc.projects.filter(p=>p.id!==project.id);doc.projects.push(ProjectModel.copy(project));
+        const category=draft.categories.find(c=>c.id===project.category);
+        if(category){doc.categories=doc.categories.filter(c=>c.id!==category.id);doc.categories.push(ProjectModel.copy(category));}
+        ProjectModel.validate(doc,true);await checkReview(project);
+        const safe=ProjectModel.publicDocument(doc);await checkFiles(safe);
+        const updatedAt=new Date(now()).toISOString();
+        await mutateState(previous,{...state,published:{document:safe,revision:(state.published?.revision||0)+1,updatedAt}});
+        return json({published:true,id:project.id,updatedAt,sandbox});
       }
       if (path === '/api/publish' && request.method === 'POST') {
         sameOrigin(request); await owner(request);
         const data = await readJSON(request, 4096), previous = await entry('state'), state = previous?.data;
         if (!state?.draft || !Number.isSafeInteger(data.revision) || state.draft.revision !== data.revision) fail(409, 'Nacrt je promijenjen. Spremi ga pa ponovno objavi.');
         const doc = state.draft.document;
-        const files = [...doc.photos.map(p => p.src), ...doc.videos.map(v => v.src)].filter(src => src.startsWith('/media/'));
-        for (const src of new Set(files)) if (!await get('media/' + src.slice(7))) fail(400, 'Jedna datoteka nije učitana. Objavljena verzija je zadržana.');
+        ProjectModel.validate(doc,true);
+        for(const project of doc.projects||[])await checkReview(project);
+        const published=ProjectModel.publicDocument(doc);await checkFiles(published);
         const updatedAt = new Date(now()).toISOString();
-        await mutateState(previous, { ...state, published: { ...state.draft, updatedAt } });
+        await mutateState(previous, { ...state, published: { ...state.draft, document:published, updatedAt } });
         return json({ published: true, revision: data.revision, updatedAt });
       }
       if (path === '/api/media/start' && request.method === 'POST') {
@@ -265,12 +295,12 @@ export function createPortfolio({ store, password, initialDocument, originals = 
               if(completed)return json({id:session.id,completedUrl:'/media/'+session.file,resumed:true,direct:completed.backend==='r2'});
               // Preserve every old part while moving unfinished legacy uploads
               // off the Edge transfer path when direct storage is available.
-              if(!originals||!data.type.startsWith('video/')||session.backend==='r2')return json({ id: session.id, partSize: session.partSize || LEGACY_PART_SIZE, verifyBatch: 8, resumed: true, direct: session.backend === 'r2' });
+              if(!directUploads||!originals||!data.type.startsWith('video/')||session.backend==='r2')return json({ id: session.id, partSize: session.partSize || LEGACY_PART_SIZE, verifyBatch: 8, resumed: true, direct: session.backend === 'r2' });
             }
           }
         }
         const id = crypto.randomUUID();
-        const direct = !!originals && data.type.startsWith('video/');
+        const direct = directUploads && !!originals && data.type.startsWith('video/');
         const objectKey = direct ? 'originals/' + id + '.' + ext : undefined;
         const uploadId = direct ? await originals.start(objectKey,data.type) : undefined;
         const partSize = direct ? ORIGINAL_PART_SIZE : PART_SIZE;
@@ -390,7 +420,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
       if (path.startsWith('/media/') && ['GET', 'HEAD'].includes(request.method)) {
         if (!sourceOK(path) || !path.startsWith('/media/')) fail(404, 'Datoteka ne postoji.');
         const state = await get('state'), doc = state?.published?.document;
-        const visible = doc && (doc.photos.some(p => p.src === path) || doc.videos.some(v => v.src === path));
+        const visible = doc && ProjectModel.refs(publicDoc(doc)).includes(path);
         if (!visible) await owner(request);
         const manifest = await get('media/' + path.slice(7));
         if (!manifest) fail(404, 'Datoteka ne postoji.');

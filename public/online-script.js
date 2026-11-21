@@ -1,3 +1,4 @@
+let projectDocument=null,projectGallery=null,projectEditor=null;
 let editing = false;
 let selectedPhoto = null;
 let pendingFiles = 0;
@@ -100,8 +101,9 @@ dialog.addEventListener('close', () => document.body.classList.remove('dialog-op
 function captureDraft() {
   if(window.PortfolioLanguage?.language==='en')return PortfolioLanguage.withCroatian(captureDraft);
   return {
+    ...projectDocument,
     collaborations: PortfolioCollaborations.capture(),
-    version: 2, updatedAt: Date.now(), title: document.title,
+    version: projectDocument?.projects?3:2, updatedAt: Date.now(), title: document.title,
     description: document.querySelector('meta[name="description"]').content,
     texts: Array.from(document.querySelectorAll('[data-edit]'), el => el.innerHTML),
     photos: Array.from(document.querySelectorAll('[data-photo]'), el => ({ src: el.getAttribute('src'), alt: el.alt })),
@@ -175,6 +177,15 @@ async function saveChanges() {
 }
 const uploads = PortfolioUploads.createUploader({request:requestJSON});
 const uploadFile = (file,type,report=message) => uploads.upload(file,type,report);
+projectGallery=PortfolioProjectGallery.mount(document.querySelector('#project-gallery'),document.querySelector('#project-filters'));
+projectEditor=PortfolioProjectEditor.mount(document.querySelector('#project-editor'),{
+  change:markDirty,refresh:()=>projectDocument&&projectGallery.render(projectDocument,PortfolioLanguage.language),message,
+  save:saveChanges,
+  publish:id=>requestJSON('/api/projects/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,revision})}),
+  upload:async(file,type,report)=>{pendingFiles++;setSaveButton();try{return await uploadFile(file,type,report);}finally{pendingFiles--;setSaveButton();}}
+});
+document.addEventListener('portfolio-language',()=>{if(projectDocument)projectGallery.render(projectDocument,PortfolioLanguage.language);});
+
 async function addPhoto(file,target) {
   if (!file || !target) return;
   const epoch = (photoEpochs.get(target)||0)+1; photoEpochs.set(target,epoch);
@@ -219,6 +230,7 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
   video.addEventListener('error',() => {if(editing&&!failedVideoSlots.size)message('Pregled videa se nije pokrenuo. Spremljena datoteka i tekst ostaju sačuvani.');});
 });
 function applyDocument(doc) {
+  doc=PortfolioProjectModel.upgrade(doc);projectDocument=doc;
   window.PortfolioLanguage?.beforeDocument();
   PortfolioCollaborations.restore(doc.collaborations);
   document.title=doc.title; document.querySelector('meta[name="description"]').content=doc.description;
@@ -242,9 +254,13 @@ function applyDocument(doc) {
     card.dataset.mediaName=state.name||'';
   }
   window.PortfolioLanguage?.afterDocument();
+  document.querySelector('#legacy-video-grid').hidden=true;
+  projectGallery.render(projectDocument,PortfolioLanguage.language);
+  projectEditor.setDocument(projectDocument);
 }
 exportButton.addEventListener('click',async () => {
-  if(pendingFiles || publishing)return;
+  if(pendingFiles || publishing || projectEditor.busy())return;
+  try{await projectEditor.validatePublish();}catch(error){message(error.message);return;}
   if(revision===0 && !dirty)markDirty();
   const saved=await saveChanges();
   if(saved===false || dirty || saving)return;
@@ -263,6 +279,7 @@ const draftReady = (async () => {
   try {
     const [session,content]=location.pathname==='/uredi'?await Promise.all([requestJSON('/api/session'),requestJSON('/api/draft')]):await requestJSON('/api/content').then(content=>[content,content]);
     if(content.document)applyDocument(content.document);
+    if(content.sandbox){const note=document.querySelector('#sandbox-notice');note.hidden=false;note.textContent='PROBNO OKRUŽENJE — objavy se prikazuju samo ovdje. Javna stranica ostaje nepromijenjena.';}
     revision=content.revision;canEdit=session.canEdit;
     canPrepareOriginals=!!session.canPrepareOriginals;
     document.querySelector('#start-edit').hidden=!canEdit;

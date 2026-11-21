@@ -1,0 +1,22 @@
+name: Check private project editor and portfolio preview
+on:
+  push:
+    branches: [portfolio-projects-preview]
+permissions:
+  contents: read
+jobs:
+  projects:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm test && npm run build
+      - run: |
+          npm install --no-save --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Test mobile and desktop project management with isolated data
+        run: node scripts/check-projects-browser.mjs

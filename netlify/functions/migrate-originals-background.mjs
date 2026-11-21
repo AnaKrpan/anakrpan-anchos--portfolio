@@ -3,6 +3,7 @@ import {createOriginalStorage,originalStorageConfig} from '../edge-functions/lib
 import {migrateOriginal} from '../edge-functions/lib/migrate-originals.js';
 import {preparePlayback} from '../edge-functions/lib/prepare-playback.js';
 import copies from '../edge-functions/lib/viewing-copies.js';
+import '../../public/project-model.js';
 
 export default async function handler(request) {
   const password=process.env.PORTFOLIO_PASSWORD || '';
@@ -27,7 +28,7 @@ export default async function handler(request) {
   const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(snapshot.etag)));
   const hash=Array.from(digest,x=>x.toString(16).padStart(2,'0')).join('');
   await store.setJSON('history/'+hash,snapshot.data,{onlyIfNew:true});
-  const files=new Set([...(snapshot.data.draft?.document?.videos || []),...(snapshot.data.published?.document?.videos || [])].map(v=>v.src).filter(src=>/^\/media\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(src)).map(src=>src.slice(7)));
+  const files=new Set([...globalThis.PortfolioProjectModel.refs(snapshot.data.draft?.document),...globalThis.PortfolioProjectModel.refs(snapshot.data.published?.document)].filter(src=>/^\/media\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(src)).map(src=>src.slice(7)));
   const originals=createOriginalStorage(config);
   const deadline=Date.now()+13*60*1000;
   for (const file of files) {
