@@ -11,6 +11,7 @@ export async function previewStore(primary,isolated){
   const files=new Set(globalThis.PortfolioProjectModel.refs(baseline.document).map(src=>src.slice(7))),ids=new Set([...files].map(file=>file.split('.')[0]));
   const mayRead=key=>(key.startsWith('media/')&&files.has(key.slice(6)))||(key.startsWith('viewing-copies/')&&files.has(key.slice(15)))||(key.startsWith('parts/')&&ids.has(key.split('/')[1]));
   return {
+    publicMediaURL(path){return path.startsWith('/media/')&&files.has(path.slice(7))?'https://anakrpan-anchos-potrfolio.netlify.app'+path:null;},
     async get(key,options){const result=await isolated.get(key,options);return result??(mayRead(key)?primary.get(key,options):null);},
     async getWithMetadata(key,options){const result=await isolated.getWithMetadata(key,options);return result??(mayRead(key)?primary.getWithMetadata(key,options):null);},
     getMetadata:(...args)=>isolated.getMetadata(...args),

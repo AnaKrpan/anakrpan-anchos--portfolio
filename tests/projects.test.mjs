@@ -76,6 +76,8 @@ test('preview writes are isolated; fallback can only read previously public medi
   const writes=primary.writes,adapter=await previewStore(primary,isolated);assert(!JSON.stringify(await adapter.get('state')).includes('PRIVATE-DRAFT'));
   await adapter.setJSON('state',{previewOnly:true});assert.equal(primary.writes,writes);assert.equal((await primary.get('state')).draft.document.secret,'PRIVATE-DRAFT');
   assert.deepEqual(await adapter.get('media/'+source.slice(7)),{size:9});assert.equal(await adapter.get('media/99999999-9999-4999-8999-999999999999.jpg'),null);
+  assert.equal(adapter.publicMediaURL(source),'https://anakrpan-anchos-potrfolio.netlify.app'+source);
+  assert.equal(adapter.publicMediaURL('/media/99999999-9999-4999-8999-999999999999.jpg'),null);
 });
 
 test('changing an imported project also requires fresh HR and EN reviews',async()=>{

@@ -9,7 +9,10 @@ export default async function handler(request, context) {
   const sandbox=new URL(request.url).hostname!=='anakrpan-anchos-potrfolio.netlify.app';
   const primary=getStore('anchos-portfolio-v1');
   const store=sandbox?await previewStore(primary,getStore('anchos-projects-review-v1')):primary;
-  const config = originalStorageConfig(name=>Netlify.env.get(name));
+  // Review uploads stay isolated and do not require changing R2 CORS or secrets.
+  const publicMedia=sandbox?store.publicMediaURL(new URL(request.url).pathname):null;
+  if(publicMedia&&['GET','HEAD'].includes(request.method))return new Response(null,{status:307,headers:{location:publicMedia,'cache-control':'no-store'}});
+  const config = sandbox?null:originalStorageConfig(name=>Netlify.env.get(name));
   const originals = config ? createOriginalStorage(config) : null;
   // Only the existing production host starts copying old originals by default.
   // Previews stay disabled; the operator can explicitly disable migration.
