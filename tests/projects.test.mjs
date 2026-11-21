@@ -71,8 +71,17 @@ test('unsafe links, missing media, changed previews, cross-origin publication an
 });
 test('preview writes are isolated; fallback can only read previously public media',async()=>{
   const primary=new Store(),isolated=new Store();await primary.setJSON('state',{published:{document:baseline,revision:91},draft:{document:{secret:'PRIVATE-DRAFT'},revision:99}});
-  const source=M.refs(baseline)[0];await primary.setJSON('media/'+source.slice(7),{size:9});await primary.setJSON('media/secret.jpg',{secret:true});
+  const source=M.refs(baseline)[0];await primary.setJSON('media/'+source.slice(7),{size:9});await primary.setJSON('media/99999999-9999-4999-8999-999999999999.jpg',{secret:true});
   const writes=primary.writes,adapter=await previewStore(primary,isolated);assert(!JSON.stringify(await adapter.get('state')).includes('PRIVATE-DRAFT'));
   await adapter.setJSON('state',{previewOnly:true});assert.equal(primary.writes,writes);assert.equal((await primary.get('state')).draft.document.secret,'PRIVATE-DRAFT');
-  assert.deepEqual(await adapter.get('media/'+source.slice(7)),{size:9});assert.equal(await adapter.get('media/secret.jpg'),null);
+  assert.deepEqual(await adapter.get('media/'+source.slice(7)),{size:9});assert.equal(await adapter.get('media/99999999-9999-4999-8999-999999999999.jpg'),null);
+});
+
+test('changing an imported project also requires fresh HR and EN reviews',async()=>{
+  const f=await fixture(),doc=(await(await f.request('/api/draft')).json()).document,p=doc.projects[0];
+  p.title.hr='Izmijenjeni naslov';p.title.en='Updated title';p.needsReview=true;
+  await f.request('/api/draft',{method:'PUT',body:{document:doc,revision:0}});
+  assert.equal((await f.request('/api/projects/publish',{method:'POST',body:{id:p.id,revision:1}})).status,400);
+  await review(p);await f.request('/api/draft',{method:'PUT',body:{document:doc,revision:1}});
+  assert.equal((await f.request('/api/projects/publish',{method:'POST',body:{id:p.id,revision:2}})).status,200);
 });

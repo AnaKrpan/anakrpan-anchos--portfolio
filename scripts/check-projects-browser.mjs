@@ -58,12 +58,15 @@ try{
   assert(await page.locator('#sandbox-notice').isVisible());
   await page.locator('[data-edit-project="holiday-house-the-view"]').click();await page.getByRole('button',{name:'Pregled HR',exact:true}).click();
   assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
+  await page.getByText('Upravljaj kategorijama',{exact:true}).click();await page.getByRole('button',{name:'＋ Nova kategorija',exact:true}).click();
+  const categoryRow=page.locator('#project-editor details .project-fields').last();await categoryRow.getByLabel('Naziv HR',{exact:true}).fill('Probna industrija');await categoryRow.getByLabel('Naziv EN',{exact:true}).fill('Test industry');
+  await page.getByText('Upravljaj kategorijama',{exact:true}).click();
   await page.getByRole('button',{name:'＋ Novi projekt',exact:true}).click();
   await page.getByLabel('Javni naziv klijenta / brenda',{exact:true}).fill('Privatni probni brend');await page.getByLabel('Prikaži naziv klijenta',{exact:true}).selectOption('no');
   await page.getByLabel('Privatni naziv brenda (ne objavljuje se)',{exact:true}).fill('SECRET-CONTRACT');
   await page.getByLabel('Naslov projekta — HR',{exact:true}).fill('Probni projekt');await page.getByLabel('Naslov projekta — EN',{exact:true}).fill('Test project');
   await page.getByLabel('Kratak opis — HR',{exact:true}).fill('Privatna probna najava.');await page.getByLabel('Kratak opis — EN',{exact:true}).fill('Private test announcement.');
-  await page.getByLabel('Industrija',{exact:true}).selectOption('pets');await page.getByLabel('Stanje nakon objave',{exact:true}).selectOption('comingSoon');
+  await page.getByLabel('Industrija',{exact:true}).selectOption({label:'Probna industrija'});await page.getByLabel('Stanje nakon objave',{exact:true}).selectOption('comingSoon');
   await page.getByRole('button',{name:'Spremi nacrt',exact:true}).click();await page.waitForTimeout(1400);
   let draft=(await(await context.request.get(origin+'/api/draft')).json()).document;let project=draft.projects.find(p=>p.title.hr==='Probni projekt');assert(project);const id=project.id;
   assert(!(await publicData()).projects.some(p=>p.id===id));
@@ -81,12 +84,16 @@ try{
   const file=project.videos[0].src,manifest=await isolated.get('media/'+file.slice(7));const chunks=[];for(let i=1;i<=Math.ceil(manifest.size/manifest.partSize);i++)chunks.push(Buffer.from(await isolated.get('parts/'+manifest.id+'/'+i,{type:'arrayBuffer'})));assert.deepEqual(Buffer.concat(chunks),Buffer.from(fixture.video,'base64'),'Uploaded original video bytes changed');
   const anonymous=await browser.newContext({ignoreHTTPSErrors:true});assert.equal((await anonymous.request.get(origin+file)).status(),401);
   await page.getByLabel('Naslov videa — HR',{exact:true}).fill('Probni video');await page.getByLabel('Naslov videa — EN',{exact:true}).fill('Test video');await page.getByLabel('Jezik videa',{exact:true}).selectOption('hr');await page.getByLabel('Stanje nakon objave',{exact:true}).selectOption('published');
-  await previews();await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);
-  let pub=await publicData();assert.equal(pub.projects.filter(p=>p.id===id).length,1);assert.equal(pub.projects.find(p=>p.id===id).status,'published');assert.equal((await anonymous.request.get(origin+file,{headers:{range:'bytes=0-31'}})).status(),206);
+  await page.getByRole('button',{name:'Pregled HR',exact:true}).click();await page.locator('.project-preview-dialog .video-start').click();
+  await page.waitForFunction(()=>{const v=document.querySelector('.project-preview-dialog video');return v&&v.videoWidth===180&&v.videoHeight===320;});
+  await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
+  await page.getByRole('button',{name:'Pregled EN',exact:true}).click();assert.match(await page.locator('.project-preview-dialog').innerText(),/Croatian-language content/);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
+  await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);
+  let pub=await publicData();assert.equal(pub.projects.filter(p=>p.id===id).length,1);assert.equal(pub.projects.find(p=>p.id===id).status,'published');assert(pub.categories.some(c=>c.hr==='Probna industrija'&&c.en==='Test industry'));assert.equal((await anonymous.request.get(origin+file,{headers:{range:'bytes=0-31'}})).status(),206);
   await page.getByLabel('Kratak opis — HR',{exact:true}).fill('Uređeni privatni nacrt.');await page.getByRole('button',{name:'Spremi nacrt',exact:true}).click();await page.waitForTimeout(300);assert.equal((await publicData()).projects.find(p=>p.id===id).description.hr,'Privatna probna najava.');
   await page.getByLabel('Stanje nakon objave',{exact:true}).selectOption('archived');await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);assert(!(await publicData()).projects.some(p=>p.id===id));assert.equal((await anonymous.request.get(origin+file)).status(),401);
   assert.deepEqual(await primary.get('state'),originalState);assert.equal(primary.writes,originalWrites);assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({viewport,fiveOriginalVideosPreserved:true,filtersAndLanguages:true,privateDraft:true,HRandENPreviewRequired:true,comingSoonConvertedWithSameId:true,uploadBytesUnchanged:true,privateVideoProtected:true,productionStoreUntouched:true}));
+  console.log(JSON.stringify({viewport,fiveOriginalVideosPreserved:true,filtersAndLanguages:true,privateDraft:true,HRandENPreviewRequired:true,comingSoonConvertedWithSameId:true,uploadBytesUnchanged:true,privateVideoProtected:true,categoryCreation:true,verticalVideoPlayback:true,productionStoreUntouched:true}));
   await anonymous.close();await context.close();await new Promise(r=>server.close(r));
  }
 }finally{await browser.close();}
