@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import '../public/project-model.js';
 import {createPortfolio} from '../netlify/edge-functions/lib/server.js';
 import {previewStore} from '../netlify/edge-functions/lib/preview-store.js';
+import {upgradeProjects} from '../netlify/edge-functions/lib/project-seeds.js';
 const M=globalThis.PortfolioProjectModel;
 const baseline=JSON.parse(await readFile(new URL('./fixtures/language-content.json',import.meta.url))).document;
 class Store{
@@ -25,7 +26,7 @@ async function fixture(){
 }
 async function review(p,languages=['hr','en']){const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(M.reviewPayload(p))));p.reviewed={digest:[...bytes].map(b=>b.toString(16).padStart(2,'0')).join(''),languages};}
 test('legacy migration retains five exact video sources, covers, all photographs, biography and comments',()=>{
-  const original=structuredClone(baseline),doc=M.upgrade(original);
+  const original=structuredClone(baseline),doc=upgradeProjects(original);
   assert.deepEqual(original,baseline);assert.deepEqual(doc.videos,baseline.videos);assert.deepEqual(doc.photos,baseline.photos);assert.deepEqual(doc.texts,baseline.texts);assert.deepEqual(doc.collaborations,baseline.collaborations);
   const imported=doc.projects.filter(p=>p.legacySlot);assert.equal(imported.length,5);assert.deepEqual(imported.map(p=>p.videos[0].src),baseline.videos.map(v=>v.src));assert(imported.every(p=>p.videos[0].poster.endsWith('-first-frame.jpg')));
   assert.equal(doc.phone,'+385 91 151 3866');assert.equal(doc.projects.filter(p=>p.status==='comingSoon').length,2);assert(doc.projects[0].upcoming.hr);
@@ -84,4 +85,12 @@ test('changing an imported project also requires fresh HR and EN reviews',async(
   assert.equal((await f.request('/api/projects/publish',{method:'POST',body:{id:p.id,revision:1}})).status,400);
   await review(p);await f.request('/api/draft',{method:'PUT',body:{document:doc,revision:1}});
   assert.equal((await f.request('/api/projects/publish',{method:'POST',body:{id:p.id,revision:2}})).status,200);
+});
+
+test('private project seed is not embedded in browser scripts',async()=>{
+  const browserModel=await readFile(new URL('../public/project-model.js',import.meta.url),'utf8');
+  assert(!browserModel.includes('Holiday House The View'));
+  const f=await fixture(),publicBody=await(await f.request('/api/content',{owner:false})).text();
+  assert(!publicBody.includes('Holiday House The View'));
+  assert((await(await f.request('/api/draft')).text()).includes('Holiday House The View'));
 });

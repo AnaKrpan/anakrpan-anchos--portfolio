@@ -20,7 +20,7 @@ class Store{
 execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout','/tmp/anchos-project-test.key','-out','/tmp/anchos-project-test.crt','-days','1','-subj','/CN=localhost'],{stdio:'ignore'});
 const browser=await chromium.launch();
 try{
- for(const viewport of [{width:390,height:844},{width:1280,height:900}]){
+ for(const viewport of [{width:360,height:800},{width:390,height:844},{width:1280,height:900}]){
   const primary=new Store(),isolated=new Store();await primary.setJSON('state',{published:{document:baseline,revision:91},draft:{document:{secret:'PRODUCTION-PRIVATE-DRAFT'},revision:99}});
   for(const src of M.refs(baseline))await primary.setJSON('media/'+src.slice(7),{backend:'r2',objectKey:'originals/'+src.slice(7),size:1000,type:src.endsWith('.jpg')?'image/jpeg':'video/mp4'});
   const originalState=await primary.get('state'),originalWrites=primary.writes,password='isolated-browser-test-password';let origin;
@@ -56,6 +56,7 @@ try{
   await page.goto(origin+'/uredi');await page.locator('#password').fill(password);await page.getByRole('button',{name:'Prijavi se',exact:true}).click();
   await page.waitForFunction(()=>document.body.classList.contains('editing'));
   assert(await page.locator('#sandbox-notice').isVisible());
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Mobile editor must not overflow horizontally');
   await page.locator('[data-edit-project="holiday-house-the-view"]').click();await page.getByRole('button',{name:'Pregled HR',exact:true}).click();
   assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
   await page.getByText('Upravljaj kategorijama',{exact:true}).click();await page.getByRole('button',{name:'＋ Nova kategorija',exact:true}).click();
@@ -92,6 +93,7 @@ try{
   let pub=await publicData();assert.equal(pub.projects.filter(p=>p.id===id).length,1);assert.equal(pub.projects.find(p=>p.id===id).status,'published');assert(pub.categories.some(c=>c.hr==='Probna industrija'&&c.en==='Test industry'));assert.equal((await anonymous.request.get(origin+file,{headers:{range:'bytes=0-31'}})).status(),206);
   await page.getByLabel('Kratak opis — HR',{exact:true}).fill('Uređeni privatni nacrt.');await page.getByRole('button',{name:'Spremi nacrt',exact:true}).click();await page.waitForTimeout(300);assert.equal((await publicData()).projects.find(p=>p.id===id).description.hr,'Privatna probna najava.');
   await page.getByLabel('Stanje nakon objave',{exact:true}).selectOption('archived');await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);assert(!(await publicData()).projects.some(p=>p.id===id));assert.equal((await anonymous.request.get(origin+file)).status(),401);
+  const preserved=(await isolated.get('state')).draft.document;assert.deepEqual(preserved.texts,baseline.texts);assert.deepEqual(preserved.photos,baseline.photos);assert.deepEqual(preserved.collaborations,baseline.collaborations);assert.equal(preserved.email,baseline.email);
   assert.deepEqual(await primary.get('state'),originalState);assert.equal(primary.writes,originalWrites);assert.deepEqual(errors,[]);
   console.log(JSON.stringify({viewport,fiveOriginalVideosPreserved:true,filtersAndLanguages:true,privateDraft:true,HRandENPreviewRequired:true,comingSoonConvertedWithSameId:true,uploadBytesUnchanged:true,privateVideoProtected:true,categoryCreation:true,verticalVideoPlayback:true,productionStoreUntouched:true}));
   await anonymous.close();await context.close();await new Promise(r=>server.close(r));

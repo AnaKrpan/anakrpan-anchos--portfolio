@@ -1,3 +1,4 @@
+import {upgradeProjects} from './project-seeds.js';
 import '../../../public/project-model.js';
 const ProjectModel=globalThis.PortfolioProjectModel;
 import { ORIGINAL_PART_SIZE } from './original-storage.js';
@@ -68,7 +69,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
   const get = (key, type = 'json') => store.get(key, { type, consistency: 'strong' });
   const entry = (key, type = 'json') => store.getWithMetadata(key, { type, consistency: 'strong' });
   const emptyState = () => ({ draft: null, published: null });
-  const upgraded=doc=>projectsEnabled?ProjectModel.upgrade(doc):doc;
+  const upgraded=doc=>projectsEnabled?upgradeProjects(doc):doc;
   const publicDoc=doc=>ProjectModel.publicDocument(upgraded(doc));
   async function checkFiles(doc){for(const src of ProjectModel.refs(doc))if(!await get('media/'+src.slice(7)))fail(400,'Jedna datoteka još nije dovršena.');}
   async function checkReview(project){

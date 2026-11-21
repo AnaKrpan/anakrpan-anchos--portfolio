@@ -1,4 +1,4 @@
-let projectDocument=null,projectGallery=null,projectEditor=null;
+let projectDocument=null,projectGallery=null,projectEditor=null,legacyEdited=false;
 let editing = false;
 let selectedPhoto = null;
 let pendingFiles = 0;
@@ -100,6 +100,7 @@ dialog.addEventListener('click', event => {
 dialog.addEventListener('close', () => document.body.classList.remove('dialog-open'));
 function captureDraft() {
   if(window.PortfolioLanguage?.language==='en')return PortfolioLanguage.withCroatian(captureDraft);
+  if(projectDocument&&!legacyEdited)return {...PortfolioProjectModel.copy(projectDocument),updatedAt:Date.now()};
   return {
     ...projectDocument,
     collaborations: PortfolioCollaborations.capture(),
@@ -194,7 +195,7 @@ async function addPhoto(file,target) {
     const photo = await PortfolioPhotos.preparePhoto(file);
     const result = await uploadFile(photo,photo.type);
     if (photoEpochs.get(target)!==epoch) return;
-    target.src = result.url; markDirty(); await saveChanges();
+    target.src = result.url; legacyEdited=true;markDirty(); await saveChanges();
   } catch (error) { message(error.message+' Prethodna fotografija je zadržana.'); }
   finally { pendingFiles--; setSaveButton(); if (dirty && !pendingFiles) saveChanges(); }
 }
@@ -230,7 +231,7 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
   video.addEventListener('error',() => {if(editing&&!failedVideoSlots.size)message('Pregled videa se nije pokrenuo. Spremljena datoteka i tekst ostaju sačuvani.');});
 });
 function applyDocument(doc) {
-  doc=PortfolioProjectModel.upgrade(doc);projectDocument=doc;
+  doc=PortfolioProjectModel.upgrade(doc);projectDocument=doc;legacyEdited=false;
   window.PortfolioLanguage?.beforeDocument();
   PortfolioCollaborations.restore(doc.collaborations);
   document.title=doc.title; document.querySelector('meta[name="description"]').content=doc.description;
@@ -272,7 +273,7 @@ exportButton.addEventListener('click',async () => {
   }catch(error){message(error.message+' Tvoj nacrt je zadržan.');}
   finally{publishing=false;setSaveButton();}
 });
-document.addEventListener('input',event => {if(editing&&(event.target.closest('[data-edit]')||event.target.closest('.editor-fields')))markDirty();});
+document.addEventListener('input',event => {if(editing&&(event.target.closest('[data-edit]')||event.target.closest('.editor-fields'))){legacyEdited=true;markDirty();}});
 window.addEventListener('beforeunload',event => {if(dirty||pendingFiles||saving||uploads.hasInterrupted()){event.preventDefault();event.returnValue='';}});
 const draftReady = (async () => {
   document.querySelector('#start-edit').hidden=true;
@@ -311,6 +312,6 @@ const draftReady = (async () => {
   }
 })();
 
-PortfolioCollaborations.init({onChange: () => markDirty(), message});
+PortfolioCollaborations.init({onChange: () => {legacyEdited=true;markDirty();}, message});
 
 document.querySelector('#sign-out').addEventListener('click',async()=>{if(dirty||pendingFiles){message('Prvo spremi izmjene i pričekaj da učitavanje završi.');return;}try{await requestJSON('/api/logout',{method:'POST'});location.href='/';}catch(error){message(error.message);}});
