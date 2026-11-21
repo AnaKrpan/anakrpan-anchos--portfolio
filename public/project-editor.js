@@ -12,7 +12,7 @@
     const previewGallery=PortfolioProjectGallery.mount(previewRoot,null);
     function message(value){status.textContent=value;options.message?.(value);}
     function button(label,action,parent=toolbar){const b=document.createElement('button');b.type='button';b.textContent=label;b.addEventListener('click',()=>Promise.resolve().then(action).catch(e=>message(e.message)));parent.append(b);return b;}
-    function changed(project){if(project)delete project.reviewed;options.change();renderList();options.refresh();}
+    function changed(project){if(project){delete project.reviewed;project.needsReview=true;}options.change();renderList();options.refresh();}
     function field(parent,label,value,set,{type='text',choices}={}){
       const wrap=document.createElement('label');wrap.textContent=label;
       const input=document.createElement(choices?'select':type==='textarea'?'textarea':'input');
@@ -34,7 +34,7 @@
       const p=current();if(!p||busy)return;
       if(p.status==='draft')throw Error('Odaberi Uskoro ili Gotov rad, pa pregledaj projekt na oba jezika.');
       M.validate({...doc,projects:[p]},true);
-      if(!p.legacySlot&&p.status!=='archived'&&(p.reviewed?.digest!==await digest(p)||!['hr','en'].every(l=>p.reviewed?.languages?.includes(l))))throw Error('Prije objave otvori Pregled HR i Pregled EN za ovu verziju projekta.');
+      if((!p.legacySlot||p.needsReview)&&p.status!=='archived'&&(p.reviewed?.digest!==await digest(p)||!['hr','en'].every(l=>p.reviewed?.languages?.includes(l))))throw Error('Prije objave otvori Pregled HR i Pregled EN za ovu verziju projekta.');
       const saved=await options.save();if(saved===false)throw Error('Prvo dovrši spremanje nacrta.');
       const result=await options.publish(p.id);message(result.sandbox?'Objavljeno samo u probnom okruženju. Javna stranica nije promijenjena.':'Projekt je objavljen na postojećem javnom linku.');renderList();
     }
@@ -113,7 +113,7 @@
       }
       button('＋ Nova kategorija',()=>{doc.categories.push({id:'category-'+crypto.randomUUID(),hr:'Nova kategorija',en:'New category',order:doc.categories.length});changed();renderCategories();renderForm();},categoryFields);
     }
-    return {setDocument(next){doc=next;renderList();renderForm();renderCategories();},busy:()=>busy>0,validatePublish:async()=>{for(const p of doc?.projects||[])if(['published','comingSoon'].includes(p.status)&&!p.legacySlot&&(p.reviewed?.digest!==await digest(p)||!['hr','en'].every(l=>p.reviewed?.languages?.includes(l))))throw Error('Prije zajedničke objave pregledaj HR i EN za: '+p.title.hr);},preview};
+    return {setDocument(next){doc=next;renderList();renderForm();renderCategories();},busy:()=>busy>0,validatePublish:async()=>{for(const p of doc?.projects||[])if(['published','comingSoon'].includes(p.status)&&(!p.legacySlot||p.needsReview)&&(p.reviewed?.digest!==await digest(p)||!['hr','en'].every(l=>p.reviewed?.languages?.includes(l))))throw Error('Prije zajedničke objave pregledaj HR i EN za: '+p.title.hr);},preview};
   }
   root.PortfolioProjectEditor={mount};
 })(globalThis);

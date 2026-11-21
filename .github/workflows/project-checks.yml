@@ -20,3 +20,24 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Test mobile and desktop project management with isolated data
         run: node scripts/check-projects-browser.mjs
+      - name: Check actual review deployment without writing production data
+        shell: python
+        run: |
+          import urllib.request,urllib.error,json,time
+          origin='https://deploy-preview-3--anakrpan-anchos-potrfolio.netlify.app'
+          data=None
+          for attempt in range(24):
+            try:
+              with urllib.request.urlopen(origin+'/api/content',timeout=20) as r: candidate=json.load(r)
+              if candidate.get('sandbox') and 'projects' in candidate.get('document',{}): data=candidate;break
+            except Exception: pass
+            time.sleep(5)
+          assert data, 'Review deployment is not ready'
+          doc=data['document']
+          assert doc['phone']=='+385 91 151 3866'
+          assert len([p for p in doc['projects'] if p.get('legacySlot')])==5
+          assert not any(p['status']=='draft' for p in doc['projects'])
+          assert not any(p['id']=='holiday-house-the-view' for p in doc['projects'])
+          try: urllib.request.urlopen(origin+'/api/draft',timeout=20);raise AssertionError('Draft exposed')
+          except urllib.error.HTTPError as error: assert error.code==401
+          print(json.dumps({'reviewDeploymentReady':True,'productionUntouched':True,'fiveLegacyProjects':True,'privateDraftProtected':True}))

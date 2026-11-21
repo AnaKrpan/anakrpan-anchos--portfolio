@@ -72,7 +72,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
   const publicDoc=doc=>ProjectModel.publicDocument(upgraded(doc));
   async function checkFiles(doc){for(const src of ProjectModel.refs(doc))if(!await get('media/'+src.slice(7)))fail(400,'Jedna datoteka još nije dovršena.');}
   async function checkReview(project){
-    if(project.legacySlot||!['published','comingSoon'].includes(project.status))return;
+    if(project.legacySlot&&!project.needsReview||!['published','comingSoon'].includes(project.status))return;
     const digest=await hash(encoder.encode(ProjectModel.reviewPayload(project)));
     if(project.reviewed?.digest!==digest||!['hr','en'].every(lang=>project.reviewed?.languages?.includes(lang)))fail(400,'Prije objave pregledaj ovu verziju projekta na hrvatskom i engleskom.');
   }

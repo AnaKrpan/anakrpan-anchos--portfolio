@@ -34,7 +34,7 @@
   function publicDocument(doc){
     const out=copy(doc);if(!out.projects)return out;
     out.projects=out.projects.filter(p=>['published','comingSoon'].includes(p.status)).map(p=>{
-      delete p.privateClient;delete p.reviewed;if(p.hideClient)p.client='';
+      delete p.privateClient;delete p.reviewed;delete p.needsReview;if(p.hideClient)p.client='';
       if(p.status==='comingSoon')p.videos=[];
       return p;
     });

@@ -12,9 +12,9 @@ class Store{
   values=new Map();n=0;writes=0;
   async get(key,{type='json'}={}){const d=this.values.get(key)?.data;if(d===undefined)return null;return type==='arrayBuffer'?new Uint8Array(d).slice().buffer:structuredClone(d);}
   async getWithMetadata(key,options={}){const e=this.values.get(key);return e?{etag:e.etag,data:await this.get(key,options)}:null;}
-  async getMetadata(key){return this.values.has(key)?{etag:this.values.get(key).etag}:null;}
-  async setJSON(key,data,options={}){const old=this.values.get(key);if(options.onlyIfNew&&old||options.onlyIfMatch&&options.onlyIfMatch!==old?.etag)return {modified:false};this.writes++;this.values.set(key,{data:structuredClone(data),etag:String(++this.n)});return {modified:true};}
-  async set(key,data){return this.setJSON(key,new Uint8Array(data));}
+  async getMetadata(key){return this.values.has(key)?{etag:this.values.get(key).etag,metadata:structuredClone(this.values.get(key).metadata||{})}:null;}
+  async setJSON(key,data,options={}){const old=this.values.get(key);if(options.onlyIfNew&&old||options.onlyIfMatch&&options.onlyIfMatch!==old?.etag)return {modified:false};this.writes++;this.values.set(key,{data:structuredClone(data),metadata:structuredClone(options.metadata||{}),etag:String(++this.n)});return {modified:true};}
+  async set(key,data,options){return this.setJSON(key,new Uint8Array(data),options);}
   async delete(){throw Error('No media deletion permitted');}
 }
 execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout','/tmp/anchos-project-test.key','-out','/tmp/anchos-project-test.crt','-days','1','-subj','/CN=localhost'],{stdio:'ignore'});
@@ -32,7 +32,7 @@ try{
       const chunks=[];for await(const block of req)chunks.push(block);const body=Buffer.concat(chunks);
       const request=new Request(origin+req.url,{method:req.method,headers:req.headers,...(body.length?{body}:{} )});
       const store=await previewStore(primary,isolated);
-      response=await createPortfolio({store,password,initialDocument:baseline,projectsEnabled:true,sandbox:true,directUploads:false,originals:{signedURL:async key=>'https://storage.test/'+key},log:()=>{}}).fetch(request,{ip:'test',rewrite:staticResponse});
+      response=await createPortfolio({store,password,initialDocument:baseline,projectsEnabled:true,sandbox:true,directUploads:false,originals:{signedURL:async key=>'https://storage.test/'+key},log:entry=>{if(entry.status>=500)console.log('LOCAL_API_ERROR',JSON.stringify(entry));}}).fetch(request,{ip:'test',rewrite:staticResponse});
     }else response=await staticResponse(path);
     res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));
    }catch(e){res.writeHead(500);res.end(e.message);}

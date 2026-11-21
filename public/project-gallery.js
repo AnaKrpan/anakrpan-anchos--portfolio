@@ -17,7 +17,7 @@
         if(v.poster&&M.safePoster(v.poster)){const image=document.createElement('img');image.src=v.poster;image.alt='';image.loading='lazy';a.append(image);}
         const label=document.createElement('span');a.append(label);media={external:label};
       }else{const missing=document.createElement('p');missing.className='project-missing';frame.append(missing);media={missing};}
-      return {box,update(next){title.textContent=M.local(next.title,language);const lang=next.language==='hr'?text('Hrvatski','Croatian-language content'):next.language==='en'?'English':next.language==='none'?text('Bez govora','No speech'):'';tags.textContent=[...next.types,lang].filter(Boolean).join(' · ');if(media.external)media.external.textContent=text('Pogledaj video ↗','Watch video ↗');if(media.missing)media.missing.textContent=text('Video još nije dostavljen.','Video not supplied yet.');}};
+      return {box,update(next){title.textContent=M.local(next.title,language);title.hidden=!title.textContent||next._hideTitle;const lang=next.language==='hr'?text('Hrvatski','Croatian-language content'):next.language==='en'?'English':next.language==='none'?text('Bez govora','No speech'):'';tags.textContent=[...next.types,lang].filter(Boolean).join(' · ');if(media.external)media.external.textContent=text('Pogledaj video ↗','Watch video ↗');if(media.missing)media.missing.textContent=text('Video još nije dostavljen.','Video not supplied yet.');}};
     }
     function makeCard(p){
       const element=document.createElement('article');element.className='project-card';element.dataset.projectId=p.id;
@@ -27,19 +27,21 @@
       const location=document.createElement('p');location.className='project-location';
       const description=document.createElement('p');description.className='project-description';
       const badge=document.createElement('span');badge.className='project-badge';
+      const cover=document.createElement('img');cover.className='project-teaser-image';cover.loading='lazy';cover.hidden=true;
       const videos=document.createElement('div');videos.className='project-videos';
       const upcoming=document.createElement('p');upcoming.className='project-upcoming';
-      element.append(eyebrow,client,title,location,description,badge,videos,upcoming);
+      element.append(eyebrow,client,title,location,description,badge,cover,videos,upcoming);
       let signature='',children=[];
       return {element,update(next){
-        element.classList.toggle('project-featured',!!next.featured);element.classList.toggle('project-coming',next.status==='comingSoon');
+        element.classList.toggle('project-featured',!!next.featured&&next.status!=='comingSoon');element.classList.toggle('project-coming',next.status==='comingSoon');
         const category=doc.categories.find(c=>c.id===next.category);eyebrow.textContent=category?.[language]||'';
         client.textContent=next.hideClient?'':next.client;client.hidden=!client.textContent;
         title.textContent=M.local(next.title,language);if(title.textContent===client.textContent)client.hidden=true;
         location.textContent=M.local(next.location,language);location.hidden=!location.textContent;
         description.textContent=M.local(next.description,language);description.hidden=!description.textContent;
         badge.textContent=next.status==='comingSoon'?text('Uskoro','Coming Soon'):next.featured?text('Istaknuti projekt','Featured Project'):'';badge.hidden=!badge.textContent;
-        const list=next.status==='comingSoon'?[]:(next.videos||[]).map(v=>({...v,poster:v.poster||next.cover||''}));
+        if(next.status==='comingSoon'&&next.cover){if(cover.getAttribute('src')!==next.cover)cover.src=next.cover;cover.alt=M.local(next.title,language);cover.hidden=false;}else{cover.hidden=true;cover.removeAttribute('src');}
+        const list=next.status==='comingSoon'?[]:(next.videos||[]).map(v=>({...v,poster:v.poster||next.cover||'',_hideTitle:next.videos.length===1&&M.local(v.title,language)===M.local(next.title,language)}));
         const fingerprint=JSON.stringify(list.map(v=>[v.id,v.src,v.poster,v.kind]));
         if(signature!==fingerprint){children.forEach(c=>c.box.querySelector('video')?.pause());videos.replaceChildren();children=list.map(createVideo);children.forEach(c=>videos.append(c.box));signature=fingerprint;}
         children.forEach((c,i)=>{c.update(list[i]);c.box.hidden=!M.visible(list[i],language);if(c.box.hidden)c.box.querySelector('video')?.pause();});
@@ -50,7 +52,7 @@
     }
     function render(next,lang='hr',options={}){
       doc=next;language=lang;preview=!!options.preview;
-      const projects=doc.projects.filter(p=>options.only?p.id===options.only:['published','comingSoon'].includes(p.status)).sort((a,b)=>Number(b.featured)-Number(a.featured)||(a.status==='comingSoon')-(b.status==='comingSoon')||a.order-b.order);
+      const projects=doc.projects.filter(p=>options.only?p.id===options.only:['published','comingSoon'].includes(p.status)).sort((a,b)=>(a.status==='comingSoon')-(b.status==='comingSoon')||Number(b.featured)-Number(a.featured)||a.order-b.order);
       const available=new Set(projects.filter(p=>M.visible(p,language)||preview).map(p=>p.category));
       if(selected!=='all'&&!available.has(selected))selected='all';
       if(filterContainer){
