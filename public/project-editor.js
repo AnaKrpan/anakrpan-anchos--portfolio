@@ -49,14 +49,14 @@
       }
     }
     async function upload(file,video,poster=false){
-      if(!file||busy)return;const p=current();if(!p)return;busy++;message(poster?'Spremam naslovnicu…':'Prenosim originalni video…');
+      if(!file||busy)return;const p=current();if(!p)return;busy++;container.querySelectorAll('input[type=file]').forEach(input=>input.disabled=true);message(poster?'Spremam naslovnicu…':'Prenosim originalni video…');
       try{
         let target=file,type=file.type;
         if(poster){target=await PortfolioPhotos.preparePhoto(file);type=target.type;}
         else{const extension=file.name.split('.').pop().toLowerCase();type={mp4:'video/mp4',mov:'video/quicktime',m4v:'video/x-m4v',webm:'video/webm',ogv:'video/ogg'}[extension]||type;if(!type.startsWith('video/'))throw Error('Odaberi video datoteku.');}
         const result=await options.upload(target,type,message);
         if(poster)video.poster=result.url;else{video.src=result.url;video.kind='file';video.originalName=file.name;}
-        changed(p);await options.save();message(poster?'Naslovnica spremljena u privatni nacrt.':'Video spremljen bez dodatne kompresije. Pregledaj projekt prije objave.');
+        changed(p);const saved=await options.save();if(saved===false)throw Error('Datoteka je prenesena, ali nacrt nije spremljen. Pritisni Spremi nacrt prije zatvaranja.');message(poster?'Naslovnica spremljena u privatni nacrt.':'Video spremljen bez dodatne kompresije. Pregledaj projekt prije objave.');
       }finally{busy--;renderForm();}
     }
     function renderForm(){

@@ -180,7 +180,7 @@ const uploadFile = (file,type,report=message) => uploads.upload(file,type,report
 projectGallery=PortfolioProjectGallery.mount(document.querySelector('#project-gallery'),document.querySelector('#project-filters'));
 projectEditor=PortfolioProjectEditor.mount(document.querySelector('#project-editor'),{
   change:markDirty,refresh:()=>projectDocument&&projectGallery.render(projectDocument,PortfolioLanguage.language),message,
-  save:saveChanges,
+  save:async()=>{let result=await saveChanges();if(result===false)return false;if(dirty)result=await saveChanges();return result;},
   publish:id=>requestJSON('/api/projects/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,revision})}),
   upload:async(file,type,report)=>{pendingFiles++;setSaveButton();try{return await uploadFile(file,type,report);}finally{pendingFiles--;setSaveButton();}}
 });
