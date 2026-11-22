@@ -84,3 +84,7 @@ test('different files with the same size get different identities', async () => 
   const a=new Blob([new Uint8Array(100)]), b=new Blob([new Uint8Array(100).fill(1)]);
   assert.notEqual(await api.fingerprint(a,'video/mp4'),await api.fingerprint(b,'video/mp4'));
 });
+
+test('a stalled asynchronous operation rejects instead of holding the upload queue indefinitely',async()=>{
+  const api=load();await assert.rejects(api.bounded(new Promise(()=>{}),10,'Čitanje je zastalo'),/Čitanje je zastalo/);
+});

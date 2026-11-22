@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import https from 'node:https';
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,open} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {resolve} from 'node:path';
 import {chromium} from 'playwright';
@@ -38,7 +39,7 @@ try{
    }catch(e){res.writeHead(500);res.end(e.message);}
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));origin='https://127.0.0.1:'+server.address().port;
-  const context=await browser.newContext({viewport,ignoreHTTPSErrors:true}),page=await context.newPage(),errors=[];let videoRequests=0;
+  const context=await browser.newContext({viewport,ignoreHTTPSErrors:true,...(viewport.width<=600?{isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'}:{})}),page=await context.newPage(),errors=[];let videoRequests=0;
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.origin!==origin){route.abort();return;}if(url.pathname.startsWith('/media/')&&/\.(mp4|webm)$/.test(url.pathname))videoRequests++;route.continue();});
   const publicData=async()=>{const r=await context.request.get(origin+'/api/content');return (await r.json()).document;};
@@ -120,14 +121,63 @@ try{
   await page.locator('[data-edit-project="holiday-house-the-view"]').click();await page.getByRole('button',{name:'Pregled HR',exact:true}).click();
   assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();
   const fixture=await page.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=180;canvas.height=320;const c=canvas.getContext('2d');c.fillStyle='#ddd0c7';c.fillRect(0,0,180,320);c.fillStyle='#382f29';c.font='20px sans-serif';c.fillText('TEST ONLY',28,160);const cover=canvas.toDataURL('image/jpeg').split(',')[1];const stream=canvas.captureStream(10),recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'}),parts=[];recorder.ondataavailable=e=>parts.push(e.data);const finished=new Promise(r=>recorder.onstop=r);recorder.start();await new Promise(r=>setTimeout(r,350));c.fillText('TEST',40,220);await new Promise(r=>setTimeout(r,350));recorder.stop();await finished;stream.getTracks().forEach(t=>t.stop());const bytes=new Uint8Array(await new Blob(parts).arrayBuffer());let value='';for(const b of bytes)value+=String.fromCharCode(b);return {video:btoa(value),cover};});
+
+  const androidLarge=viewport.width===390;
+  const uploadMessages=[];let failedOnce=false,firstHeld=false,releaseFirst;
+  const firstGate=new Promise(resolve=>releaseFirst=resolve);
+  let largePaths=[];
+  if(androidLarge){
+    await mkdir('/tmp/anchos-android-large',{recursive:true});
+    const base='/tmp/anchos-android-large/base.mp4';
+    execFileSync('ffmpeg',['-loglevel','error','-y','-f','lavfi','-i','color=c=gray:s=180x320:r=10','-t','1','-an','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',base]);
+    const movie=await readFile(base);
+    for(let i=0;i<3;i++){
+      const name='/tmp/anchos-android-large/holiday-'+i+'.mp4',free=Buffer.alloc(8);free.writeUInt32BE(64*1024*1024);free.write('free',4);
+      await writeFile(name,Buffer.concat([movie,free]));const handle=await open(name,'r+');const size=movie.length+64*1024*1024;
+      await handle.truncate(size);await handle.write(Buffer.from([i+1]),0,1,size-1);await handle.close();largePaths.push(name);
+    }
+    await page.route('**/api/media/part?*',async route=>{
+      const url=new URL(route.request().url());
+      if(!firstHeld){firstHeld=true;await firstGate;}
+      if(url.searchParams.get('part')==='2'&&!failedOnce){failedOnce=true;await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'Testni prekid veze — pokušaj ponovno.'})});return;}
+      route.continue();
+    });
+    await page.exposeFunction('recordUploadStatus',value=>uploadMessages.push(value));
+    await page.evaluate(()=>new MutationObserver(()=>{document.querySelectorAll('#project-editor [data-transfer-key] [role=status]').forEach(el=>window.recordUploadStatus(el.textContent));}).observe(document.querySelector('#project-editor'),{subtree:true,childList:true,characterData:true}));
+    await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).nth(0).setInputFiles(largePaths[0]);
+    await page.getByLabel('Kratak opis — HR',{exact:true}).fill('Privatni opis tijekom prijenosa.');
+    await page.getByLabel('Kratak opis — EN',{exact:true}).fill('Private description edited during upload.');
+    assert.equal(await page.locator('#project-editor input[type=file]:disabled').count(),0);
+    await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).nth(1).setInputFiles(largePaths[1]);
+    await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).nth(2).setInputFiles(largePaths[2]);
+    releaseFirst();
+    await page.locator('#project-editor fieldset').nth(0).getByRole('button',{name:'Ponovi prijenos',exact:true}).click({timeout:120000});
+    await page.waitForFunction(async()=>{const d=await(await fetch('/api/draft')).json();return d.document.projects.find(p=>p.id==='holiday-house-the-view').videos.every(v=>v.src);},{},{timeout:180000});
+    assert(failedOnce);assert(uploadMessages.some(m=>/Preneseno:.*%/.test(m)));assert(uploadMessages.some(m=>/Pokušaj ponovno/.test(m)));
+  }
   for(let i=0;i<3;i++){
-    await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).nth(i).setInputFiles({name:'private-holiday-test-'+i+'.webm',mimeType:'video/webm',buffer:Buffer.from(fixture.video,'base64')});
-    await page.waitForFunction(()=>!document.querySelector('#project-editor input[type=file]')?.disabled);await page.waitForTimeout(500);
+    await page.evaluate(index=>document.body.dataset.testVideoIndex=index,i);
+    if(!androidLarge){
+      await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).nth(i).setInputFiles({name:'private-holiday-test-'+i+'.webm',mimeType:'video/webm',buffer:Buffer.from(fixture.video,'base64')});
+      await page.waitForFunction(async()=>{const d=await(await fetch('/api/draft')).json();return !!d.document.projects.find(p=>p.id==='holiday-house-the-view').videos[Number(document.body.dataset.testVideoIndex||0)].src;});
+    }
+    await page.evaluate(index=>document.body.dataset.testVideoIndex=index,i);
     await page.getByLabel('Dodaj / zamijeni naslovnicu',{exact:true}).nth(i).setInputFiles({name:'private-holiday-cover-'+i+'.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.cover,'base64')});
-    await page.waitForFunction(()=>!document.querySelector('#project-editor input[type=file]')?.disabled);await page.waitForTimeout(500);
+    await page.waitForFunction(async index=>{const d=await(await fetch('/api/draft')).json();return !!d.document.projects.find(p=>p.id==='holiday-house-the-view').videos[index].poster;},i);
   }
   const holidayDraft=(await(await context.request.get(origin+'/api/draft')).json()).document.projects.find(p=>p.id==='holiday-house-the-view');
   assert.equal(holidayDraft.status,'draft');assert(holidayDraft.videos.every(v=>v.src&&v.poster));
+  if(androidLarge){
+    assert.equal(holidayDraft.description.hr,'Privatni opis tijekom prijenosa.');
+    for(let i=0;i<3;i++){
+      const manifest=await isolated.get('media/'+holidayDraft.videos[i].src.slice(7)),hash=createHash('sha256');
+      assert(manifest.size>64*1024*1024);
+      for(let n=1;n<=Math.ceil(manifest.size/manifest.partSize);n++)hash.update(Buffer.from(await isolated.get('parts/'+manifest.id+'/'+n,{type:'arrayBuffer'})));
+      assert.equal(hash.digest('hex'),createHash('sha256').update(await readFile(largePaths[i])).digest('hex'),'Large original MP4 bytes must be preserved');
+    }
+    console.log(JSON.stringify({androidChromiumEmulation:true,MP4MegabytesPerVideo:64,threeVideosSaved:true,failedTransferRetried:true,editingDuringUpload:true,percentProgress:true}));
+  }
+
   assert(!(await publicData()).projects.some(p=>p.id==='holiday-house-the-view'));
   const outsider=await browser.newContext({ignoreHTTPSErrors:true});
   assert.equal((await outsider.request.get(origin+'/api/draft')).status(),401);

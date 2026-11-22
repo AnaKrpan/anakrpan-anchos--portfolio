@@ -749,8 +749,16 @@ const TransportMD5 = (function (undefined) {
 })();
 (function (root) {
   const memory = new Map();
-  let database;
+  let database,storageUnavailable=false;
+  function bounded(operation,ms,message){
+    let timer;return Promise.race([Promise.resolve(operation),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),ms);})]).finally(()=>clearTimeout(timer));
+  }
+  async function readPart(blob){
+    try{return await bounded(blob.arrayBuffer(),45000,'Mobitel nije uspio pročitati datoteku. Preuzmi je iz oblaka u mapu Preuzimanja pa ponovno pokušaj.');}
+    catch(error){throw new Error('Čitanje datoteke: '+error.message);}
+  }
   function openDatabase() {
+    if(storageUnavailable)return Promise.reject(new Error('Local progress storage unavailable'));
     if (database) return database;
     database = new Promise((resolve, reject) => {
       if (!root.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
@@ -766,22 +774,22 @@ const TransportMD5 = (function (undefined) {
   }
   const storage = {
     async get(key) {
-      try { const db = await openDatabase(); return await new Promise((resolve, reject) => { const tx = db.transaction('progress', 'readonly'), request = tx.objectStore('progress').get(key); tx.oncomplete = () => resolve(request.result); tx.onabort = tx.onerror = () => reject(tx.error); }); }
-      catch (_) { return memory.get(key); }
+      try { const db = await openDatabase(); return await bounded(new Promise((resolve, reject) => { const tx = db.transaction('progress', 'readonly'), request = tx.objectStore('progress').get(key); tx.oncomplete = () => resolve(request.result); tx.onabort = tx.onerror = () => reject(tx.error); }),4000,'Lokalna pohrana napretka ne odgovara.'); }
+      catch (_) { storageUnavailable=true;return memory.get(key); }
     },
     async set(key, value) {
       memory.set(key, structuredClone(value));
-      try { const db = await openDatabase(); await new Promise((resolve, reject) => { const tx = db.transaction('progress', 'readwrite'); tx.objectStore('progress').put(value, key); tx.oncomplete = resolve; tx.onabort = tx.onerror = () => reject(tx.error); }); } catch (_) { /* The server index can recover progress even when local storage is unavailable. */ }
+      try { const db = await openDatabase(); await bounded(new Promise((resolve, reject) => { const tx = db.transaction('progress', 'readwrite'); tx.objectStore('progress').put(value, key); tx.oncomplete = resolve; tx.onabort = tx.onerror = () => reject(tx.error); }),4000,'Lokalna pohrana napretka ne odgovara.'); } catch (_) { storageUnavailable=true; /* The server index can recover progress even when local storage is unavailable. */ }
     },
     async remove(key) {
       memory.delete(key);
-      try { const db = await openDatabase(); await new Promise((resolve, reject) => { const tx = db.transaction('progress', 'readwrite'); tx.objectStore('progress').delete(key); tx.oncomplete = resolve; tx.onabort = tx.onerror = () => reject(tx.error); }); } catch (_) {}
+      try { const db = await openDatabase(); await bounded(new Promise((resolve, reject) => { const tx = db.transaction('progress', 'readwrite'); tx.objectStore('progress').delete(key); tx.oncomplete = resolve; tx.onabort = tx.onerror = () => reject(tx.error); }),4000,'Lokalna pohrana napretka ne odgovara.'); } catch (_) {storageUnavailable=true;}
     }
   };
   async function fingerprint(file, type) {
     // Read only small samples; never load a multi-GB video into browser memory.
-    const head = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
-    const tail = new Uint8Array(await file.slice(Math.max(0, file.size - 65536), file.size).arrayBuffer());
+    const head = new Uint8Array(await readPart(file.slice(0, 65536)));
+    const tail = new Uint8Array(await readPart(file.slice(Math.max(0, file.size - 65536), file.size)));
     const identity = new TextEncoder().encode(JSON.stringify({ size: file.size, type }));
     const bytes = new Uint8Array(head.length + tail.length + identity.length);
     bytes.set(head); bytes.set(tail, head.length); bytes.set(identity, head.length + tail.length);
@@ -813,7 +821,7 @@ const TransportMD5 = (function (undefined) {
       for (let attempt = 0; attempt < attempts; attempt++) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
-        try { return await send(path, { ...options, signal: controller.signal }); }
+        try { return await bounded(send(path, { ...options, signal: controller.signal }),timeoutMs,'Veza nije odgovorila na vrijeme. Spremljeni dijelovi ostaju sačuvani.'); }
         catch (error) {
           if (error.status && ![408,429,500,502,503,504].includes(error.status) || attempt === attempts - 1) {
             error.stage = stage;
@@ -828,7 +836,7 @@ const TransportMD5 = (function (undefined) {
       const transfer = async () => {
         if (!file || file.size < 1) throw new Error('Odabrana datoteka je prazna.');
         if (file.size > 2 * 1024 ** 3) throw new Error('Video je veći od dopuštenih 2 GB.');
-        report('Provjeravam izvornu datoteku…');
+        report('Priprema datoteke: 0 %. Čitam male uzorke izvornog videa…');
         const key = await fingerprint(file, type);
         interrupted.add(key);
         const persist = async state => { try { await progressStorage.set(key, state); } catch (_) {} };
@@ -845,9 +853,11 @@ const TransportMD5 = (function (undefined) {
             let sent=0;
             for (let offset=0,part=1;offset<file.size;offset+=partSize,part++) {
               const blob=file.slice(offset,offset+partSize), size=blob.size;
-              const body=await blob.arrayBuffer();
+              const body=await readPart(blob);
               if(body.byteLength!==size)throw new Error('Mobitel nije vratio cijeli dio datoteke.');
-              const checksum=root.btoa(TransportMD5.ArrayBuffer.hash(body,true));
+              const hash=new TransportMD5.ArrayBuffer();
+              for(let index=0;index<body.byteLength;index+=256*1024){hash.append(body.slice(index,index+256*1024));await sleep(0);}
+              const checksum=root.btoa(hash.end(true));hash.destroy();
               const saved=receipts.get(part);
               // Server receipts are authoritative; do not resend confirmed parts.
               if (saved?.size !== size || saved?.checksum !== checksum) {
@@ -933,5 +943,5 @@ const TransportMD5 = (function (undefined) {
     }
     return { upload, hasInterrupted: () => interrupted.size > 0 };
   }
-  root.PortfolioUploads = { createUploader, fingerprint, storage, nativeDirectRequest };
+  root.PortfolioUploads = { createUploader, fingerprint, storage, nativeDirectRequest, readPart, bounded };
 })(typeof globalThis === 'undefined' ? window : globalThis);
