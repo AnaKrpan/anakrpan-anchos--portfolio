@@ -3,6 +3,9 @@
   function mount(container,filterContainer){
     const cards=new Map(),filterButtons=new Map();let doc,language='hr',selected='all',preview=false;
     const text=(hr,en)=>language==='en'?en:hr;
+    const upcomingSection=document.createElement('section');upcomingSection.className='project-upcoming-section';
+    const upcomingHeading=document.createElement('h3');upcomingHeading.id='upcoming-'+crypto.randomUUID();upcomingSection.setAttribute('aria-labelledby',upcomingHeading.id);
+    const upcomingGrid=document.createElement('div');upcomingGrid.className='project-upcoming-grid';upcomingSection.append(upcomingHeading,upcomingGrid);
     function createVideo(v){
       const box=document.createElement('div');box.className='project-video';box.dataset.projectVideo=v.id;
       const frame=document.createElement('div');frame.className='video-frame';box.append(frame);
@@ -63,8 +66,19 @@
       const ids=projects.map(p=>p.id);
       cards.forEach((card,id)=>{if(!ids.includes(id)){card.element.querySelectorAll('video').forEach(v=>v.pause());card.element.remove();cards.delete(id);}});
       for(const p of projects){let card=cards.get(p.id);if(!card){card=makeCard(p);cards.set(p.id,card);}card.update(p);}
-      const current=[...container.children].map(el=>el.dataset.projectId);
-      if(JSON.stringify(ids)!==JSON.stringify(current))ids.forEach(id=>container.append(cards.get(id).element));
+      const grouped=selected==='all'&&!preview;
+      container.classList.toggle('projects-all-work',grouped);
+      upcomingHeading.textContent=text('Uskoro','Coming Soon');
+      const teasers=grouped?projects.filter(p=>p.status==='comingSoon'):[];
+      const finished=grouped?projects.filter(p=>p.status!=='comingSoon'):projects;
+      function place(parent,elements){elements.forEach((element,index)=>{if(parent.children[index]!==element)parent.insertBefore(element,parent.children[index]||null);});}
+      if(grouped){
+        place(upcomingGrid,teasers.map(p=>cards.get(p.id).element));
+        upcomingSection.hidden=!teasers.some(p=>M.visible(p,language));
+        place(container,[...finished.map(p=>cards.get(p.id).element),upcomingSection]);
+      }else{
+        place(container,finished.map(p=>cards.get(p.id).element));upcomingSection.remove();
+      }
     }
     return {render};
   }
