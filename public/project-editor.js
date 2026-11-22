@@ -26,7 +26,7 @@
     async function preview(lang){
       const p=current();if(!p)return;
       p.reviewed={digest:await digest(p),languages:[...new Set([...(p.reviewed?.digest===await digest(p)?p.reviewed.languages:[]),lang])]};
-      options.change();previewInfo.textContent=(lang==='hr'?'Privatni pregled — hrvatski':'Private preview — English')+' · '+(p.status==='draft'?'Projekt je nacrt. Nije objavljen.':'Ovo je pregled prije objave.');
+      options.change();previewInfo.textContent=(lang==='hr'?'Privatni pregled — hrvatski':'Private preview — English')+' · '+(lang==='en'?(p.status==='draft'?'This project is a private draft. It is not published.':'Preview before publishing.'):(p.status==='draft'?'Projekt je nacrt. Nije objavljen.':'Ovo je pregled prije objave.'));close.textContent=lang==='en'?'Close preview':'Zatvori pregled';dialog.setAttribute('aria-label',lang==='en'?'Private project preview':'Privatni pregled projekta');
       previewGallery.render(doc,lang,{preview:true,only:p.id});dialog.showModal();
       message('Pregledano: '+p.reviewed.languages.map(l=>l.toUpperCase()).join(' / ')+'. Izmjena projekta traži novi pregled.');
     }

@@ -20,6 +20,8 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Test mobile and desktop project management with isolated data
         run: node scripts/check-projects-browser.mjs
+      - name: Check full public HR and EN translations without changing content
+        run: node scripts/check-language-browser.mjs
       - name: Check actual review deployment without writing production data
         shell: python
         run: |

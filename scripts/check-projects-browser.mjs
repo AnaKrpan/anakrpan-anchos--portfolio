@@ -104,13 +104,21 @@ try{
   assert.equal(await page.locator('#project-filters button:visible').nth(1).innerText(),'Smještaj i putovanja');
   await page.getByRole('button',{name:'Smještaj i putovanja',exact:true}).click();
   assert.equal(await page.locator('#project-gallery .project-card:visible').first().getAttribute('data-project-id'),'holiday-house-the-view');
-  await page.getByRole('button',{name:'Galerija EN',exact:true}).click();
+  await page.evaluate(()=>{window.savedDraftScroll=scrollY;[...document.querySelectorAll('#project-editor button')].find(b=>b.textContent==='Galerija EN').click();});
+  assert(Math.abs(await page.evaluate(()=>scrollY-window.savedDraftScroll))<2,'Switching private preview language must preserve scroll position');
   assert.equal(await page.locator('#project-filters button:visible').nth(1).innerText(),'Travel & Hospitality');
+  const holidayEnglish=page.locator('#project-gallery [data-project-id="holiday-house-the-view"]');
+  assert.equal(await holidayEnglish.locator('.project-title').innerText(),'One Location. Three Creative Approaches.');
+  assert.deepEqual(await holidayEnglish.locator('.project-video-title').allTextContents(),['UGC Promotional Video','Aesthetic Property Showcase','Influencer Experience & Review']);
+  const holidayTags=await holidayEnglish.locator('.project-tags').allTextContents();
+  assert.match(holidayTags[0],/English/);assert.match(holidayTags[1],/No Voiceover/);assert.match(holidayTags[2],/Croatian/);
+  assert.equal(await holidayEnglish.locator('.project-badge').first().innerText(),'Private draft');
+
   await page.getByRole('button',{name:'All Work',exact:true}).click();
   assert.equal(await page.locator('#project-gallery > .project-card').first().getAttribute('data-project-id'),'holiday-house-the-view');
   await page.getByRole('button',{name:'Galerija HR',exact:true}).click();
   await page.locator('[data-edit-project="holiday-house-the-view"]').click();await page.getByRole('button',{name:'Pregled HR',exact:true}).click();
-  assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
+  assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();
   const fixture=await page.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=180;canvas.height=320;const c=canvas.getContext('2d');c.fillStyle='#ddd0c7';c.fillRect(0,0,180,320);c.fillStyle='#382f29';c.font='20px sans-serif';c.fillText('TEST ONLY',28,160);const cover=canvas.toDataURL('image/jpeg').split(',')[1];const stream=canvas.captureStream(10),recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'}),parts=[];recorder.ondataavailable=e=>parts.push(e.data);const finished=new Promise(r=>recorder.onstop=r);recorder.start();await new Promise(r=>setTimeout(r,350));c.fillText('TEST',40,220);await new Promise(r=>setTimeout(r,350));recorder.stop();await finished;stream.getTracks().forEach(t=>t.stop());const bytes=new Uint8Array(await new Blob(parts).arrayBuffer());let value='';for(const b of bytes)value+=String.fromCharCode(b);return {video:btoa(value),cover};});
   for(let i=0;i<3;i++){
     await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).nth(i).setInputFiles({name:'private-holiday-test-'+i+'.webm',mimeType:'video/webm',buffer:Buffer.from(fixture.video,'base64')});
@@ -125,7 +133,7 @@ try{
   assert.equal((await outsider.request.get(origin+'/api/draft')).status(),401);
   for(const v of holidayDraft.videos)assert.equal((await outsider.request.get(origin+v.src)).status(),401);
   await outsider.close();
-  for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();assert.equal(await page.locator('.project-preview-dialog video').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();}
+  for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();assert.equal(await page.locator('.project-preview-dialog video').count(),3);await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();}
 
 
   await page.locator('[data-edit-project="legacy-1"]').click();
@@ -136,7 +144,7 @@ try{
   assert.equal(convertedDraft.videos.length,2);assert.equal(convertedDraft.upcoming.hr,'');assert.equal(convertedDraft.videos[1].src,'');
   assert.equal((await publicData()).projects.find(p=>p.id==='legacy-1').videos.length,1);
   await page.locator('[data-edit-project="legacy-3"]').click();await page.getByRole('button',{name:'↑ Gore',exact:true}).click();
-  for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();}
+  for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();}
   await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(500);
   const reordered=(await publicData()).projects.filter(p=>p.legacySlot).sort((a,b)=>a.order-b.order);
   assert.deepEqual(reordered.map(p=>p.id),['legacy-3','legacy-1','legacy-2','legacy-5','legacy-4']);
@@ -155,7 +163,7 @@ try{
   let draft=(await(await context.request.get(origin+'/api/draft')).json()).document;let project=draft.projects.find(p=>p.title.hr==='Probni projekt');assert(project);const id=project.id;
   assert(!(await publicData()).projects.some(p=>p.id===id));
   await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();assert(!(await publicData()).projects.some(p=>p.id===id));
-  async function previews(){for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();}}
+  async function previews(){for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();}}
   await previews();await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);
   assert((await publicData()).projects.some(p=>p.id===id&&p.status==='comingSoon'));assert(!JSON.stringify(await publicData()).includes('SECRET-CONTRACT'));assert(!JSON.stringify(await publicData()).includes('Privatni probni brend'));
   await page.getByRole('button',{name:'＋ Dodaj video ili poveznicu',exact:true}).click();
@@ -169,8 +177,8 @@ try{
   await page.getByLabel('Naslov videa — HR',{exact:true}).fill('Probni video');await page.getByLabel('Naslov videa — EN',{exact:true}).fill('Test video');await page.getByLabel('Jezik videa',{exact:true}).selectOption('hr');await page.getByLabel('Stanje nakon objave',{exact:true}).selectOption('published');
   await page.getByRole('button',{name:'Pregled HR',exact:true}).click();await page.locator('.project-preview-dialog .video-start').click();
   await page.waitForFunction(()=>{const v=document.querySelector('.project-preview-dialog video');return v&&v.videoWidth===180&&v.videoHeight===320;});
-  await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
-  await page.getByRole('button',{name:'Pregled EN',exact:true}).click();assert.match(await page.locator('.project-preview-dialog').innerText(),/Croatian-language content/);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
+  await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();
+  await page.getByRole('button',{name:'Pregled EN',exact:true}).click();assert.match(await page.locator('.project-preview-dialog').innerText(),/Croatian-language content/);await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();
   await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);
   let pub=await publicData();assert.equal(pub.projects.filter(p=>p.id===id).length,1);assert.equal(pub.projects.find(p=>p.id===id).status,'published');assert(pub.categories.some(c=>c.hr==='Probna industrija'&&c.en==='Test industry'));assert.equal((await anonymous.request.get(origin+file,{headers:{range:'bytes=0-31'}})).status(),206);
   await page.getByLabel('Kratak opis — HR',{exact:true}).fill('Uređeni privatni nacrt.');await page.getByRole('button',{name:'Spremi nacrt',exact:true}).click();await page.waitForTimeout(300);assert.equal((await publicData()).projects.find(p=>p.id===id).description.hr,'Privatna probna najava.');
