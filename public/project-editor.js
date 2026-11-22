@@ -55,7 +55,7 @@
     function refreshTransfers(){
       container.querySelectorAll('[data-transfer-key]').forEach(row=>{
         const state=transfers.get(row.dataset.transferKey),label=row.querySelector('[role=status]'),retry=row.querySelector('button');
-        label.textContent=state?state.file.name+' — '+state.message:'';
+        label.hidden=!state;label.textContent=state?state.file.name+' — '+state.message:'';
         retry.hidden=!state?.failed;retry.disabled=!!state?.running;
       });
     }
