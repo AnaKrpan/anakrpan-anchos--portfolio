@@ -1,8 +1,8 @@
 (function(root){
   const categories=[
-    ['travel','Turizam i smještaj','Travel & Hospitality'],['wellness','Wellness i životni stil','Wellness & Lifestyle'],
+    ['travel','Smještaj i putovanja','Travel & Hospitality'],['wellness','Wellness i životni stil','Wellness & Lifestyle'],
     ['beauty','Ljepota, moda i osobna njega','Beauty, Fashion & Personal Care'],['pets','Kućni ljubimci','Pet & Animal Care'],
-    ['home','Dom i životni stil','Home & Lifestyle'],['creative','Kreativne i tehnološke usluge','Creative & Technology']
+    ['home','Dom i životni stil','Home & Lifestyle'],['creative','Kreativne i tehnološke usluge','Creative & Technology'],['jewelry','Nakit i modni dodaci','Jewelry & Accessories']
   ].map(([id,hr,en],order)=>({id,hr,en,order}));
   const types=['UGC','Influencer Marketing','Voiceover','Aesthetic Showcase'];
   const copy=value=>JSON.parse(JSON.stringify(value));
@@ -18,6 +18,11 @@
   function emptyVideo(){return {id:crypto.randomUUID(),title:pair(),src:'',kind:'file',poster:'',types:[],language:'other',visibility:'both'};}
   function upgrade(doc){
     const result=copy(doc);
+    if(Array.isArray(result.categories)){
+      const travel=result.categories.find(c=>c.id==='travel');
+      if(travel){if(travel.hr==='Turizam i smještaj')travel.hr='Smještaj i putovanja';travel.order=Math.min(-1,...result.categories.filter(c=>c.id!=='travel').map(c=>c.order-1));}
+      if(!result.categories.some(c=>c.id==='jewelry'))result.categories.push({id:'jewelry',hr:'Nakit i modni dodaci',en:'Jewelry & Accessories',order:result.categories.length});
+    }
     if(Array.isArray(result.projects)){
       if(!result.brandRowsOrderInitialized){
         const legacy=result.projects.filter(p=>p.legacySlot);

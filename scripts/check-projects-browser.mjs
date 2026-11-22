@@ -46,7 +46,9 @@ try{
   const publicBefore=await publicData();assert.equal(publicBefore.phone,'+385 91 151 3866');assert(!JSON.stringify(publicBefore).includes('holiday-house-the-view'));
   assert.equal(await page.locator('#project-gallery .project-video video').count(),5);
   assert.deepEqual(await page.locator('#project-gallery .project-video video').evaluateAll(vs=>vs.map(v=>v.dataset.mediaSrc)),[0,2,1,4,3].map(i=>baseline.videos[i].src));
-  assert.equal(await page.getByRole('button',{name:'Turizam i smještaj',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Smještaj i putovanja',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Nakit i modni dodaci',exact:true}).count(),0);
+  assert.equal(await page.locator('#project-gallery [data-project-id="jewelry-accessories"]').count(),0);
   assert.equal(await page.locator('.project-coming .video-start').count(),0);
   assert.equal(await page.locator('#project-gallery > .project-upcoming-section .project-coming').count(),2);
   assert.equal(await page.locator('#project-gallery > .project-card.project-coming').count(),0);
@@ -88,6 +90,12 @@ try{
   await page.waitForFunction(()=>document.body.classList.contains('editing'));
   assert(await page.locator('#sandbox-notice').isVisible());
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Mobile editor must not overflow horizontally');
+  await page.locator('[data-edit-project="jewelry-accessories"]').click();
+  assert.equal(await page.getByLabel('Naslov projekta — HR',{exact:true}).inputValue(),'Nakit i modni dodaci');
+  assert.equal(await page.getByLabel('Naslov projekta — EN',{exact:true}).inputValue(),'Jewelry & Accessories');
+  assert.equal(await page.getByLabel('Stanje nakon objave',{exact:true}).inputValue(),'draft');
+  assert.equal(await page.getByLabel('Industrija',{exact:true}).inputValue(),'jewelry');
+  assert(await page.getByLabel('Influencer Marketing',{exact:true}).isChecked());
   await page.locator('[data-edit-project="holiday-house-the-view"]').click();await page.getByRole('button',{name:'Pregled HR',exact:true}).click();
   assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
 

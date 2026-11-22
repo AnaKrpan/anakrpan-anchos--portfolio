@@ -96,3 +96,19 @@ test('private project seed is not embedded in browser scripts',async()=>{
   assert(!publicBody.includes('Holiday House The View'));
   assert((await(await f.request('/api/draft')).text()).includes('Holiday House The View'));
 });
+
+test('jewelry is a private bilingual seed, survives upgrades and follows finished brands',async()=>{
+  const upgraded=upgradeProjects(baseline),jewelry=upgraded.projects.find(p=>p.id==='jewelry-accessories');
+  assert.equal(jewelry.status,'draft');assert.equal(jewelry.client,'');assert.equal(jewelry.category,'jewelry');
+  assert(jewelry.title.hr&&jewelry.title.en&&jewelry.description.hr&&jewelry.description.en);
+  assert.deepEqual(jewelry.videos[0].types,['Influencer Marketing']);assert.equal(jewelry.videos[0].src,'');
+  assert(jewelry.order>Math.max(...upgraded.projects.filter(p=>p.legacySlot).map(p=>p.order)));
+  assert.equal(upgradeProjects(upgraded).projects.filter(p=>p.id===jewelry.id).length,1);
+  const stored=structuredClone(upgraded);stored.projects.find(p=>p.id===jewelry.id).title.hr='Vlastiti naslov';
+  assert.equal(upgradeProjects(stored).projects.find(p=>p.id===jewelry.id).title.hr,'Vlastiti naslov');
+  const oldProjects=M.upgrade(baseline);assert(upgradeProjects(oldProjects).projects.some(p=>p.id===jewelry.id));
+  const f=await fixture(),pub=await(await f.request('/api/content',{owner:false})).text(),draft=await(await f.request('/api/draft')).json();
+  assert(!pub.includes('jewelry-accessories'));assert(draft.document.projects.some(p=>p.id===jewelry.id));
+  const categories=[...draft.document.categories].sort((a,b)=>a.order-b.order);
+  assert.equal(categories[0].id,'travel');assert.equal(categories[0].hr,'Smještaj i putovanja');
+});
