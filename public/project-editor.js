@@ -46,7 +46,7 @@
     button('Pregled HR',()=>preview('hr'));button('Pregled EN',()=>preview('en'));button('Objavi odabrani projekt',publish);
     function renderList(){
       list.replaceChildren();if(!doc)return;
-      for(const p of [...doc.projects].sort((a,b)=>a.order-b.order)){
+      for(const p of [...doc.projects].filter(p=>!p.retiredEmptyBarkodeTemplate).sort((a,b)=>a.order-b.order)){
         const b=button((p.title.hr||p.client||'Novi projekt')+' · '+({draft:'nacrt',published:'gotov rad',comingSoon:'uskoro',archived:'uklonjen iz prikaza'}[p.status]),()=>{currentId=p.id;renderForm();renderList();},list);
         b.setAttribute('aria-pressed',String(p.id===currentId));b.dataset.editProject=p.id;
       }

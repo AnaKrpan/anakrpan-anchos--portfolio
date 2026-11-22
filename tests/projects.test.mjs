@@ -134,3 +134,18 @@ test('Barkode seed adds Affiliate Marketing without replacing existing Holiday o
   const reused=upgradeProjects(manuallyCreated);assert.equal(reused.projects.filter(p=>p.client==='Barkode').length,1);
   assert.equal(reused.projects.find(p=>p.id==='owner-barkode').description.hr,'Vlastiti opis');
 });
+
+test('only the empty generated Barkode duplicate is retired; completed work and every other project remain exact',()=>{
+  const doc=upgradeProjects(baseline),finished=M.copy(doc.projects.find(p=>p.id==='barkode'));
+  finished.id='owner-finished-barkode';finished.videos[0].src=baseline.videos[0].src;
+  finished.description.hr='Moj gotovi Barkode rad';doc.projects.push(finished);
+  const untouched=structuredClone(doc.projects.filter(p=>p.id!=='barkode'));
+  const result=upgradeProjects(doc);
+  assert.equal(result.projects.find(p=>p.id==='barkode').status,'archived');
+  assert.equal(result.projects.find(p=>p.id==='barkode').retiredEmptyBarkodeTemplate,true);
+  for(const p of untouched)assert.deepEqual(result.projects.find(next=>next.id===p.id),p);
+  assert.deepEqual(M.refs(result),M.refs(doc));
+  const uploaded=structuredClone(doc);uploaded.projects.find(p=>p.id==='barkode').videos[0].src=baseline.videos[1].src;
+  assert.deepEqual(upgradeProjects(uploaded).projects.find(p=>p.id==='barkode'),uploaded.projects.find(p=>p.id==='barkode'));
+  const alone=upgradeProjects(baseline);assert.equal(alone.projects.find(p=>p.id==='barkode').status,'draft');
+});

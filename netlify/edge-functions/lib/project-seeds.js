@@ -27,5 +27,12 @@ export function upgradeProjects(doc){
     }
     result.barkodeDraftPrepared=true;
   }
+  // Retire only the empty generated template when a separate Barkode video exists.
+  // Keep all records and media; never touch an uploaded template or other projects.
+  const template=result.projects.find(p=>p.id==='barkode');
+  const hasBarkodeVideo=result.projects.some(p=>p.id!=='barkode'&&p.status!=='archived'&&/\bbarkode\b/i.test([p.client,p.title?.hr,p.title?.en].join(' '))&&p.videos?.some(v=>M.safeSource(v.src)));
+  if(template?.status==='draft'&&!template.videos.some(v=>v.src)&&hasBarkodeVideo){
+    template.status='archived';template.retiredEmptyBarkodeTemplate=true;
+  }
   return result;
 }
