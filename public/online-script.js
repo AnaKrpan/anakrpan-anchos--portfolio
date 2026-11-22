@@ -144,12 +144,19 @@ function markDirty() {
   clearTimeout(saveTimer); saveTimer = setTimeout(() => saveChanges(), 1200);
 }
 async function requestJSON(path, options = {}) {
-  let response;
-  try { response = await fetch(path, { credentials:'same-origin', ...options }); }
-  catch (error) { throw new Error(error.name === 'AbortError' ? 'Veza je prespora ili je prekinuta.' : 'Veza sa stranicom je prekinuta.'); }
-  let data; try { data = await response.json(); } catch (_) { throw new Error('Veza sa stranicom nije dostupna. Izmjene su zadržane u ovoj kartici.'); }
-  if (!response.ok) { const error = new Error(data.error || 'Spremanje nije uspjelo.'); error.status = response.status; error.trace = data.trace; throw error; }
-  return data;
+  const controller=new AbortController(),upstream=options.signal;
+  const forward=()=>controller.abort();upstream?.addEventListener('abort',forward,{once:true});if(upstream?.aborted)forward();
+  let timer;
+  const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('Veza nije odgovorila u 35 sekundi. Spremanje nije potvrđeno; podaci ostaju u otvorenoj kartici. Pokušaj ponovno.'));},35000);});
+  const operation=(async()=>{
+    let response;
+    try{response=await fetch(path,{credentials:'same-origin',...options,signal:controller.signal});}
+    catch(error){throw new Error(error.name==='AbortError'?'Veza je prespora ili je prekinuta.':'Veza sa stranicom je prekinuta.');}
+    let data;try{data=await response.json();}catch(_){throw new Error('Veza sa stranicom nije dostupna. Izmjene su zadržane u ovoj kartici.');}
+    if(!response.ok){const error=new Error(data.error||'Spremanje nije uspjelo.');error.status=response.status;error.trace=data.trace;throw error;}return data;
+  })();
+  try{return await Promise.race([operation,deadline]);}
+  finally{clearTimeout(timer);upstream?.removeEventListener('abort',forward);}
 }
 function setSaveButton() { exportButton.disabled = !!saving || publishing || pendingFiles > 0 || !canEdit; exportButton.textContent = publishing ? 'Objavljujem…' : saving ? 'Spremam nacrt…' : 'Spremi i objavi'; }
 async function saveChanges() {
@@ -192,7 +199,7 @@ projectGallery=PortfolioProjectGallery.mount(document.querySelector('#project-ga
 projectEditor=PortfolioProjectEditor.mount(document.querySelector('#project-editor'),{
   change:markDirty,refresh:renderProjectGallery,message,
   fullPreview:lang=>{if(projectSandbox&&editing){const x=scrollX,y=scrollY;const switching=['hr','en'].includes(lang);if(switching)privateGalleryLanguage=lang;renderProjectGallery();if(switching)scrollTo({left:x,top:y,behavior:'instant'});else document.querySelector('#private-gallery-preview-notice').scrollIntoView({behavior:'smooth',block:'start'});}},
-  save:async()=>{while(saving||dirty){if(saving){if(await saving===false)return false;await new Promise(resolve=>setTimeout(resolve,0));}else if(await saveChanges()===false)return false;}return true;},
+  save:async()=>{if(!canEdit){message('Prijava za uređivanje više nije potvrđena. Podaci ostaju u otvorenoj kartici.');return false;}for(let attempt=0;attempt<4;attempt++){if(saving){if(await saving===false)return false;await new Promise(resolve=>setTimeout(resolve,0));}else if(await saveChanges()===false)return false;if(!saving&&!dirty)return true;await new Promise(resolve=>setTimeout(resolve,50));}message('Još postoje nove izmjene. Ponovno pritisni Spremi nacrt; podaci su zadržani.');return false;},
   publish:id=>requestJSON('/api/projects/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,revision})}),
   upload:async(file,type,report)=>{pendingFiles++;setSaveButton();try{return await uploadFile(file,type,report);}finally{pendingFiles--;setSaveButton();}}
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import https from 'node:https';
-import {readFile,writeFile,mkdir,open} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,open,copyFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {resolve} from 'node:path';
@@ -186,6 +186,43 @@ try{
   for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();assert.equal(await page.locator('.project-preview-dialog video').count(),3);await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();}
 
 
+
+  if(androidLarge){
+    await page.locator('[data-edit-project="jewelry-accessories"]').click();
+    await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).setInputFiles({name:'earrings-preserved.webm',mimeType:'video/webm',buffer:Buffer.from(fixture.video,'base64')});
+    await page.waitForFunction(()=>!projectEditor.busy()&&!dirty&&!saving);
+    await page.getByLabel('Dodaj / zamijeni naslovnicu',{exact:true}).setInputFiles({name:'earrings-preserved.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.cover,'base64')});
+    await page.waitForFunction(()=>!projectEditor.busy()&&!dirty&&!saving);
+    const preservedBefore=(await(await context.request.get(origin+'/api/draft')).json()).document.projects.filter(p=>['holiday-house-the-view','jewelry-accessories'].includes(p.id));
+    await page.locator('[data-edit-project="barkode"]').click();
+    assert(await page.getByLabel('Affiliate Marketing',{exact:true}).isChecked());
+    assert.equal(await page.getByLabel('Naslov projekta — EN',{exact:true}).inputValue(),'Barkode – Influencer & Affiliate Collaboration');
+    let releaseBarkode,partStarted,stalledSave=false;
+    const gate=new Promise(r=>releaseBarkode=r),started=new Promise(r=>partStarted=r);
+    await page.route('**/api/media/part?*',async route=>{if(!partStarted)return route.continue();const resolve=partStarted;partStarted=null;resolve();await gate;route.continue();});
+    await page.route('**/api/draft',async route=>{
+      const req=route.request(),payload=req.method()==='PUT'?req.postDataJSON():null;
+      if(!stalledSave&&payload?.document.projects.find(p=>p.id==='barkode')?.videos[0]?.src){
+        stalledSave=true;await new Promise(r=>setTimeout(r,40000));await route.abort().catch(()=>{});return;
+      }
+      route.continue();
+    });
+    const barkodePath='/tmp/anchos-android-large/barkode.mp4';await copyFile(largePaths[0],barkodePath);
+    const handle=await open(barkodePath,'r+'),stat=await handle.stat();await handle.write(Buffer.from([9]),0,1,stat.size-1);await handle.close();
+    await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).setInputFiles(barkodePath);
+    await started;
+    await page.getByRole('button',{name:'＋ Novi projekt',exact:true}).click();
+    assert.equal(await page.getByLabel('Javni naziv klijenta / brenda',{exact:true}).inputValue(),'','New project must remain available during another upload');
+    await page.locator('[data-edit-project="barkode"]').click();releaseBarkode();
+    await page.getByRole('button',{name:'Ponovi prijenos',exact:true}).click({timeout:120000});
+    await page.waitForFunction(()=>!projectEditor.busy()&&!dirty&&!saving,{},{timeout:120000});
+    const after=(await(await context.request.get(origin+'/api/draft')).json()).document;
+    assert(stalledSave);assert(after.projects.find(p=>p.id==='barkode').videos[0].src);
+    assert.equal(after.projects.find(p=>p.id==='barkode').status,'draft');
+    for(const p of preservedBefore)assert.deepEqual(after.projects.find(next=>next.id===p.id),p);
+    assert(!(await publicData()).projects.some(p=>p.id==='barkode'));
+    console.log(JSON.stringify({barkodeLargeMP4DraftSaved:true,stalledDraftSaveRecovered:true,newProjectWhileUploading:true,HolidayAndEarringsUnchanged:true}));
+  }
   await page.locator('[data-edit-project="legacy-1"]').click();
   await page.getByRole('button',{name:'Dodaj gotov video umjesto najave',exact:true}).click();
   assert.equal(await page.locator('#project-editor fieldset').count(),2);

@@ -17,5 +17,15 @@ export function upgradeProjects(doc){
     }
     result.jewelryDraftPrepared=true;
   }
+  if(!result.barkodeDraftPrepared){
+    const existing=result.projects.find(p=>p.id==='barkode'||p.client?.trim().toLowerCase()==='barkode'||/^barkode\b/i.test(p.title?.hr||''));
+    if(!existing){
+      const p=M.emptyProject();
+      Object.assign(p,{id:'barkode',client:'Barkode',category:'pets',order:Math.max(6,...result.projects.filter(p=>p.status!=='comingSoon').map(p=>p.order+1)),title:M.pair('Barkode – Influencer & Affiliate suradnja','Barkode – Influencer & Affiliate Collaboration'),description:M.pair('Promotivni video nastao u sklopu influencer i affiliate suradnje s brendom Barkode, koji nudi dodatke prehrani i proizvode za njegu pasa. Sadržaj se temelji na autentičnom predstavljanju proizvoda, osobnom iskustvu i preporuci publici.','Promotional video created as part of an influencer and affiliate collaboration with Barkode, a brand offering supplements and care products for dogs. The content focuses on authentic product presentation, personal experience and audience recommendations.')});
+      p.videos=[{...M.emptyVideo(),title:M.pair('Barkode – Influencer & Affiliate suradnja','Barkode – Influencer & Affiliate Collaboration'),types:['Influencer Marketing','Affiliate Marketing']}];
+      result.projects.push(p);
+    }
+    result.barkodeDraftPrepared=true;
+  }
   return result;
 }

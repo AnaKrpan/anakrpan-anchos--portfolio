@@ -112,3 +112,25 @@ test('jewelry is a private bilingual seed, survives upgrades and follows finishe
   const categories=[...draft.document.categories].sort((a,b)=>a.order-b.order);
   assert.equal(categories[0].id,'travel');assert.equal(categories[0].hr,'Smještaj i putovanja');
 });
+
+test('Barkode seed adds Affiliate Marketing without replacing existing Holiday or jewelry data',()=>{
+  const existing=upgradeProjects(baseline);
+  existing.projects=existing.projects.filter(p=>p.id!=='barkode');delete existing.barkodeDraftPrepared;
+  const holiday=existing.projects.find(p=>p.id==='holiday-house-the-view'),jewelry=existing.projects.find(p=>p.id==='jewelry-accessories');
+  holiday.description=M.pair('Moj spremljeni opis','My saved description');
+  holiday.videos[0].src=baseline.videos[0].src;holiday.videos[1].src=baseline.videos[1].src;
+  jewelry.description=M.pair('Moje naušnice','My earrings');jewelry.videos[0].src=baseline.videos[2].src;
+  const before=structuredClone(existing.projects),upgraded=upgradeProjects(existing);
+  for(const p of before)assert.deepEqual(upgraded.projects.find(next=>next.id===p.id),p);
+  const barkode=upgraded.projects.find(p=>p.id==='barkode');
+  assert.equal(barkode.status,'draft');assert.equal(barkode.category,'pets');assert.equal(barkode.videos[0].src,'');
+  assert.deepEqual(barkode.videos[0].types,['Influencer Marketing','Affiliate Marketing']);
+  assert.equal(barkode.title.hr,'Barkode – Influencer & Affiliate suradnja');
+  assert.equal(barkode.title.en,'Barkode – Influencer & Affiliate Collaboration');
+  assert(M.types.includes('Affiliate Marketing'));assert.doesNotThrow(()=>M.validate(upgraded));
+  assert(!M.publicDocument(upgraded).projects.some(p=>p.id===barkode.id));
+  const manuallyCreated=structuredClone(existing),manual=M.copy(barkode);manual.id='owner-barkode';manual.description.hr='Vlastiti opis';
+  manuallyCreated.projects.push(manual);
+  const reused=upgradeProjects(manuallyCreated);assert.equal(reused.projects.filter(p=>p.client==='Barkode').length,1);
+  assert.equal(reused.projects.find(p=>p.id==='owner-barkode').description.hr,'Vlastiti opis');
+});

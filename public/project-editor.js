@@ -39,7 +39,7 @@
       const saved=await options.save();if(saved===false)throw Error('Prvo dovrši spremanje nacrta.');
       const result=await options.publish(p.id);message(result.sandbox?'Objavljeno samo u probnom okruženju. Javna stranica nije promijenjena.':'Projekt je objavljen na postojećem javnom linku.');renderList();
     }
-    button('＋ Novi projekt',()=>{if(!doc||busy)return;const p=M.emptyProject();p.order=doc.projects.length;doc.projects.push(p);currentId=p.id;changed(p);renderForm();});
+    button('＋ Novi projekt',()=>{if(!doc)return;const p=M.emptyProject();p.order=doc.projects.length;doc.projects.push(p);currentId=p.id;changed(p);renderForm();});
     button('Spremi nacrt',async()=>{const saved=await options.save();if(saved!==false)message('Privatni nacrt spremljen. Nove izmjene još nisu objavljene.');});
     button('Pregled cijele galerije',()=>options.fullPreview?.());
     button('Galerija HR',()=>options.fullPreview?.('hr'));button('Galerija EN',()=>options.fullPreview?.('en'));
@@ -68,7 +68,7 @@
       try{
         let target=file,type=file.type;
         if(poster){target=await PortfolioPhotos.preparePhoto(file);type=target.type;}
-        else{const extension=file.name.split('.').pop().toLowerCase();type={mp4:'video/mp4',mov:'video/quicktime',m4v:'video/x-m4v',webm:'video/webm',ogv:'video/ogg'}[extension]||type;if(!type.startsWith('video/'))throw Error('Odaberi video datoteku.');}
+        else{const extension=file.name.split('.').pop().toLowerCase();type={mp4:'video/mp4',mov:'video/quicktime',m4v:'video/x-m4v',webm:'video/webm',ogv:'video/ogg'}[extension]||type;if(!['video/mp4','video/quicktime','video/x-m4v','video/webm','video/ogg'].includes(type))throw Error('Format nije podržan. Odaberi MP4, MOV, M4V, WebM ili OGV datoteku, do 2 GB.');}
         const result=await options.upload(target,type,report);
         if(poster)video.poster=result.url;else{video.src=result.url;video.kind='file';video.originalName=file.name;}
         changed(p);
@@ -125,8 +125,8 @@
         M.types.forEach(type=>{const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=v.types.includes(type);check.addEventListener('change',()=>{v.types=check.checked?[...v.types,type]:v.types.filter(t=>t!==type);changed(p);});label.append(check,document.createTextNode(type));types.append(label);});
         const files=document.createElement('div');files.className='project-fields';section.append(files);
         function inputFile(label,accept,handler){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement('input');input.type='file';input.setAttribute('aria-label',label);input.accept=accept;input.disabled=false;input.addEventListener('change',()=>{const file=input.files[0];input.value='';handler(file).catch(e=>message(e.message));});wrap.append(input);files.append(wrap);transferControls(wrap,p,v,label==='Dodaj / zamijeni naslovnicu');}
-        inputFile('Dodaj / zamijeni originalni video','video/*',file=>upload(file,v));
-        inputFile('Dodaj / zamijeni naslovnicu','image/jpeg,image/png,image/webp',file=>upload(file,v,true));
+        inputFile('Dodaj / zamijeni originalni video','video/*',file=>upload(file,v,false,p));
+        inputFile('Dodaj / zamijeni naslovnicu','image/jpeg,image/png,image/webp',file=>upload(file,v,true,p));
         if(v.poster){const image=document.createElement('img');image.className='project-cover-check';image.src=v.poster;image.alt='Naslovnica videa '+(i+1);section.append(image);}
         button('↑ Video gore',()=>{if(i>0&&!busy){[p.videos[i-1],p.videos[i]]=[p.videos[i],p.videos[i-1]];changed(p);renderForm();}},section);
         button('↓ Video dolje',()=>{if(i<p.videos.length-1&&!busy){[p.videos[i+1],p.videos[i]]=[p.videos[i],p.videos[i+1]];changed(p);renderForm();}},section);

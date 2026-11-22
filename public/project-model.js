@@ -4,7 +4,7 @@
     ['beauty','Ljepota, moda i osobna njega','Beauty, Fashion & Personal Care'],['pets','Kućni ljubimci','Pet & Animal Care'],
     ['home','Dom i životni stil','Home & Lifestyle'],['creative','Kreativne i tehnološke usluge','Creative & Technology'],['jewelry','Nakit i modni dodaci','Jewelry & Accessories']
   ].map(([id,hr,en],order)=>({id,hr,en,order}));
-  const types=['UGC','Influencer Marketing','Voiceover','Aesthetic Showcase'];
+  const types=['UGC','Influencer Marketing','Affiliate Marketing','Voiceover','Aesthetic Showcase'];
   const copy=value=>JSON.parse(JSON.stringify(value));
   const pair=(hr='',en='')=>({hr,en});
   const mediaPattern=/^\/media\/[a-f0-9-]{36}\.(jpg|png|webp|mp4|mov|m4v|webm|ogv)$/;
