@@ -5,9 +5,10 @@
 </head>
 <body><main><h1>Uredi svoj<br>ANCHOS portfolio</h1><p>Prijava je dostupna samo vlasnici portfolija.</p><form id="login"><label for="password">Tvoja lozinka za portfolio</label><input id="password" type="password" autocomplete="current-password" required maxlength="1024"><button id="submit">Prijavi se</button><p id="status" role="alert"></p></form><footer><a href="/">Vrati se na portfolio</a></footer></main>
 <script>
+if(new URLSearchParams(location.search).get('pregled')==='nacrt'){document.querySelector('h1').innerHTML='Privatni pregled<br>ANCHOS portfolija';document.title='Privatni pregled — ANCHOS';}
 document.querySelector('#login').addEventListener('submit',async event=>{
   event.preventDefault();const button=document.querySelector('#submit'),status=document.querySelector('#status');button.disabled=true;status.textContent='Prijavljujem…';
-  try{const response=await fetch('/api/login',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.querySelector('#password').value})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Prijava nije uspjela.');document.querySelector('#password').value='';location.href='/uredi';}
+  try{const response=await fetch('/api/login',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.querySelector('#password').value})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Prijava nije uspjela.');document.querySelector('#password').value='';location.href=new URLSearchParams(location.search).get('pregled')==='nacrt'?'/?pregled=nacrt':'/uredi';}
   catch(error){status.textContent=error.message;button.disabled=false;}
 });
 </script></body></html>

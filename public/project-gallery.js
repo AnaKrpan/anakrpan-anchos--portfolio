@@ -42,9 +42,9 @@
         title.textContent=M.local(next.title,language);if(title.textContent===client.textContent)client.hidden=true;
         location.textContent=M.local(next.location,language);location.hidden=!location.textContent;
         description.textContent=M.local(next.description,language);description.hidden=!description.textContent;
-        badge.textContent=next.status==='draft'?text('Privatni nacrt','Private draft'):next.status==='comingSoon'?text('Uskoro','Coming Soon'):next.featured?text('Istaknuti projekt','Featured Project'):'';badge.hidden=!badge.textContent;
+        badge.textContent=next.status==='draft'&&!renderOptions.clientPreview?text('Privatni nacrt','Private draft'):next.status==='comingSoon'?text('Uskoro','Coming Soon'):next.featured?text('Istaknuti projekt','Featured Project'):'';badge.hidden=!badge.textContent;
         if(next.status==='comingSoon'&&next.cover){if(cover.getAttribute('src')!==next.cover)cover.src=next.cover;cover.alt=M.local(next.title,language);cover.hidden=false;}else{cover.hidden=true;cover.removeAttribute('src');}
-        const list=next.status==='comingSoon'?[]:(next.videos||[]).map(v=>({...v,poster:v.poster||next.cover||'',_hideTitle:next.videos.length===1&&M.local(v.title,language)===M.local(next.title,language)}));
+        const list=next.status==='comingSoon'?[]:(next.videos||[]).filter(v=>!renderOptions.clientPreview||M.safeSource(v.src)).map(v=>({...v,poster:v.poster||next.cover||'',_hideTitle:next.videos.length===1&&M.local(v.title,language)===M.local(next.title,language)}));
         const fingerprint=JSON.stringify(list.map(v=>[v.id,v.src,v.poster,v.kind]));
         if(signature!==fingerprint){children.forEach(c=>c.box.querySelector('video')?.pause());videos.replaceChildren();children=list.map(createVideo);children.forEach(c=>videos.append(c.box));signature=fingerprint;}
         children.forEach((c,i)=>{c.update(list[i]);c.box.hidden=!M.visible(list[i],language);if(c.box.hidden)c.box.querySelector('video')?.pause();});
@@ -65,7 +65,7 @@
     }
     function render(next,lang='hr',options={}){
       doc=next;language=lang;preview=!!options.preview;renderOptions=options;
-      const projects=doc.projects.filter(p=>options.only?p.id===options.only:(['published','comingSoon'].includes(p.status)||(options.includeDrafts&&p.status==='draft'))).sort((a,b)=>(a.status==='comingSoon')-(b.status==='comingSoon')||Number(b.featured)-Number(a.featured)||a.order-b.order);
+      const projects=doc.projects.filter(p=>options.only?p.id===options.only:(['published','comingSoon'].includes(p.status)||(options.includeDrafts&&p.status==='draft'&&(!options.clientPreview||p.videos?.some(v=>M.safeSource(v.src)))))).sort((a,b)=>(a.status==='comingSoon')-(b.status==='comingSoon')||Number(b.featured)-Number(a.featured)||a.order-b.order);
       const available=new Set(projects.filter(p=>(M.visible(p,language)||preview)&&(options.includeDrafts||p.category!=='jewelry'||p.status==='published')).map(p=>p.category));
       if(selected!=='all'&&!available.has(selected))selected='all';
       if(filterContainer){

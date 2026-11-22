@@ -1,9 +1,10 @@
+const clientDraftPreview=location.pathname==='/'&&new URLSearchParams(location.search).get('pregled')==='nacrt'&&location.hostname!=='anakrpan-anchos-potrfolio.netlify.app';
 let projectDocument=null,projectGallery=null,projectEditor=null,legacyEdited=false,projectSandbox=false,privateGalleryLanguage='hr';
 function renderProjectGallery(){
   if(!projectDocument||!projectGallery)return;
-  const privatePreview=projectSandbox&&editing&&location.pathname==='/uredi';
-  const previewLanguage=privatePreview?privateGalleryLanguage:PortfolioLanguage.language;
-  projectGallery.render(projectDocument,previewLanguage,{includeDrafts:privatePreview});
+  const privatePreview=projectSandbox&&(clientDraftPreview||(editing&&location.pathname==='/uredi'));
+  const previewLanguage=privatePreview&&!clientDraftPreview?privateGalleryLanguage:PortfolioLanguage.language;
+  projectGallery.render(projectDocument,previewLanguage,{includeDrafts:privatePreview,clientPreview:clientDraftPreview});
   let notice=document.querySelector('#private-gallery-preview-notice');
   if(privatePreview&&!notice){notice=document.createElement('p');notice.id='private-gallery-preview-notice';notice.className='sandbox-notice';document.querySelector('#project-filters').before(notice);}
   if(notice){notice.hidden=!privatePreview;notice.textContent=previewLanguage==='en'?'PRIVATE DRAFT PREVIEW — visible only while signed in. Nothing is published.':'PRIVATNI PREGLED NACRTA — vidljiv samo nakon prijave. Ništa nije objavljeno.';}
@@ -296,14 +297,14 @@ window.addEventListener('beforeunload',event => {if(dirty||pendingFiles||saving|
 const draftReady = (async () => {
   document.querySelector('#start-edit').hidden=true;
   try {
-    const [session,content]=location.pathname==='/uredi'?await Promise.all([requestJSON('/api/session'),requestJSON('/api/draft')]):await requestJSON('/api/content').then(content=>[content,content]);
+    const [session,content]=(location.pathname==='/uredi'||clientDraftPreview)?await Promise.all([requestJSON('/api/session'),requestJSON('/api/draft')]):await requestJSON('/api/content').then(content=>[content,content]);
     projectSandbox=!!content.sandbox;
     if(content.document)applyDocument(content.document);
     if(content.sandbox){const note=document.querySelector('#sandbox-notice');note.hidden=false;note.textContent='PROBNO OKRUŽENJE — objavy se prikazuju samo ovdje. Javna stranica ostaje nepromijenjena.';}
-    revision=content.revision;canEdit=session.canEdit;
+    revision=content.revision;canEdit=!clientDraftPreview&&session.canEdit;
     canPrepareOriginals=!!session.canPrepareOriginals;
     document.querySelector('#start-edit').hidden=!canEdit;
-    document.querySelector('#owner-signin').hidden=canEdit;
+    document.querySelector('#owner-signin').hidden=canEdit||clientDraftPreview;
     globalNotice.hidden=true; setSaveButton();
     if(canEdit && location.pathname==='/uredi')setEditing(true);
     if(canEdit && location.pathname==='/uredi' && session.migrationNeeded) {
@@ -327,6 +328,7 @@ const draftReady = (async () => {
       }).catch(()=>message('Prijenos postojećih originala još nije pokrenut. Prethodni videi i sve izmjene su zadržani.'));
     }
   } catch(error) {
+    if(clientDraftPreview&&error.status===401){location.replace('/prijava.html?pregled=nacrt');return;}
     globalNotice.hidden=false;globalNotice.textContent='Spremljeni portfolio nije moguće učitati: '+error.message+' Osvježi stranicu i pokušaj ponovno.';
   }
 })();

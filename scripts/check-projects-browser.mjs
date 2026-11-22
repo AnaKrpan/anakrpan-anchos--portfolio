@@ -270,6 +270,23 @@ try{
   let pub=await publicData();assert.equal(pub.projects.filter(p=>p.id===id).length,1);assert.equal(pub.projects.find(p=>p.id===id).status,'published');assert(pub.categories.some(c=>c.hr==='Probna industrija'&&c.en==='Test industry'));assert.equal((await anonymous.request.get(origin+file,{headers:{range:'bytes=0-31'}})).status(),206);
   await page.getByLabel('Kratak opis — HR',{exact:true}).fill('Uređeni privatni nacrt.');await page.getByRole('button',{name:'Spremi nacrt',exact:true}).click();await page.waitForTimeout(300);assert.equal((await publicData()).projects.find(p=>p.id===id).description.hr,'Privatna probna najava.');
   await page.getByLabel('Stanje nakon objave',{exact:true}).selectOption('archived');await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);assert(!(await publicData()).projects.some(p=>p.id===id));assert.equal((await anonymous.request.get(origin+file)).status(),401);
+
+  const beforeClientView=structuredClone(await isolated.get('state')),writesBeforeClientView=isolated.writes;
+  const clientPage=await context.newPage();await clientPage.goto(origin+'/?pregled=nacrt');
+  await clientPage.waitForFunction(()=>document.querySelector('#project-gallery [data-project-id="holiday-house-the-view"] video'));
+  assert.equal(await clientPage.locator('#editor-panel').isVisible(),false);
+  assert.equal(await clientPage.locator('[contenteditable=true]').count(),0);
+  assert.equal(await clientPage.locator('#start-edit').isVisible(),false);
+  assert.equal(await clientPage.locator('#project-gallery > .project-card').first().getAttribute('data-project-id'),'holiday-house-the-view');
+  assert.equal(await clientPage.locator('#project-gallery [data-project-id="holiday-house-the-view"] video').count(),3);
+  await clientPage.getByRole('button',{name:'English',exact:true}).click();
+  assert.equal(await clientPage.locator('#project-gallery [data-project-id="holiday-house-the-view"] .project-title').innerText(),'One Location. Three Creative Approaches.');
+  assert.deepEqual(await isolated.get('state'),beforeClientView);assert.equal(isolated.writes,writesBeforeClientView,'Readonly client preview must not save or publish');
+  await clientPage.close();
+  const guestPage=await anonymous.newPage();await guestPage.goto(origin+'/?pregled=nacrt');
+  await guestPage.waitForURL('**/prijava.html?pregled=nacrt');
+  assert.equal(await guestPage.locator('[data-project-id="holiday-house-the-view"]').count(),0);
+  await guestPage.close();
   const preserved=(await isolated.get('state')).draft.document;assert.deepEqual(preserved.texts,baseline.texts);assert.deepEqual(preserved.photos,baseline.photos);assert.deepEqual(preserved.collaborations,baseline.collaborations);assert.equal(preserved.email,baseline.email);
   assert.deepEqual(await primary.get('state'),originalState);assert.equal(primary.writes,originalWrites);assert.deepEqual(errors,[]);
   console.log(JSON.stringify({viewport,fiveOriginalVideosPreserved:true,filtersAndLanguages:true,privateDraft:true,HRandENPreviewRequired:true,comingSoonConvertedWithSameId:true,uploadBytesUnchanged:true,privateVideoProtected:true,categoryCreation:true,verticalVideoPlayback:true,productionStoreUntouched:true}));
