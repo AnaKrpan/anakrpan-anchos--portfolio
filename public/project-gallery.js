@@ -1,7 +1,7 @@
 (function(root){
   const M=root.PortfolioProjectModel;
   function mount(container,filterContainer){
-    const cards=new Map(),filterButtons=new Map();let doc,language='hr',selected='all',preview=false;
+    const cards=new Map(),filterButtons=new Map();let doc,language='hr',selected='all',preview=false,renderOptions={};
     const text=(hr,en)=>language==='en'?en:hr;
     const upcomingSection=document.createElement('section');upcomingSection.className='project-upcoming-section';
     const upcomingHeading=document.createElement('h3');upcomingHeading.id='upcoming-'+crypto.randomUUID();upcomingSection.setAttribute('aria-labelledby',upcomingHeading.id);
@@ -64,13 +64,13 @@
       }};
     }
     function render(next,lang='hr',options={}){
-      doc=next;language=lang;preview=!!options.preview;
+      doc=next;language=lang;preview=!!options.preview;renderOptions=options;
       const projects=doc.projects.filter(p=>options.only?p.id===options.only:(['published','comingSoon'].includes(p.status)||(options.includeDrafts&&p.status==='draft'))).sort((a,b)=>(a.status==='comingSoon')-(b.status==='comingSoon')||Number(b.featured)-Number(a.featured)||a.order-b.order);
       const available=new Set(projects.filter(p=>(M.visible(p,language)||preview)&&(options.includeDrafts||p.category!=='jewelry'||p.status==='published')).map(p=>p.category));
       if(selected!=='all'&&!available.has(selected))selected='all';
       if(filterContainer){
         const filters=[{id:'all',hr:'Svi radovi',en:'All Work'},...doc.categories.filter(c=>available.has(c.id)).sort((a,b)=>a.order-b.order)];
-        for(const f of filters){let button=filterButtons.get(f.id);if(!button){button=document.createElement('button');button.type='button';button.dataset.category=f.id;button.addEventListener('click',()=>{selected=f.id;render(doc,language,options);});filterButtons.set(f.id,button);filterContainer.append(button);}button.textContent=f[language];button.setAttribute('aria-pressed',String(selected===f.id));button.hidden=false;const index=filters.indexOf(f);if(filterContainer.children[index]!==button)filterContainer.insertBefore(button,filterContainer.children[index]||null);}
+        for(const f of filters){let button=filterButtons.get(f.id);if(!button){button=document.createElement('button');button.type='button';button.dataset.category=f.id;button.addEventListener('click',()=>{selected=f.id;render(doc,language,renderOptions);});filterButtons.set(f.id,button);filterContainer.append(button);}button.textContent=f[language];button.setAttribute('aria-pressed',String(selected===f.id));button.hidden=false;const index=filters.indexOf(f);if(filterContainer.children[index]!==button)filterContainer.insertBefore(button,filterContainer.children[index]||null);}
         filterButtons.forEach((button,id)=>{if(!filters.some(f=>f.id===id))button.hidden=true;});
       }
       const ids=projects.map(p=>p.id);
