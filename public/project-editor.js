@@ -9,7 +9,7 @@
     container.append(toolbar,status,list,form,categories);
     const dialog=document.createElement('dialog');dialog.className='project-preview-dialog';dialog.setAttribute('aria-label','Privatni pregled projekta');
     const close=document.createElement('button');close.type='button';close.textContent='Zatvori pregled';const previewInfo=document.createElement('p');const previewRoot=document.createElement('div');previewRoot.className='projects-grid';previewRoot.dataset.projectUi='';dialog.append(close,previewInfo,previewRoot);document.body.append(dialog);
-    close.addEventListener('click',()=>dialog.close());dialog.addEventListener('close',()=>previewRoot.querySelectorAll('video').forEach(v=>v.pause()));
+    close.addEventListener('click',()=>dialog.close());dialog.addEventListener('close',()=>previewRoot.querySelectorAll('video').forEach(v=>{if(v.getAttribute('src'))PortfolioVideoLoading.controller(v).reset();else v.pause();}));
     const previewGallery=PortfolioProjectGallery.mount(previewRoot,null);
     function message(value){status.textContent=value;options.message?.(value);}
     function button(label,action,parent=toolbar){const b=document.createElement('button');b.type='button';b.textContent=label;b.addEventListener('click',()=>Promise.resolve().then(action).catch(e=>message(e.message)));parent.append(b);return b;}

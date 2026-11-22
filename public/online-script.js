@@ -142,7 +142,7 @@ const globalNotice = document.querySelector('#online-notice');
 function markDirty() {
   dirty = true; serial++;
   document.querySelector('#draft-status').textContent = 'Spremam privatni nacrt…';
-  clearTimeout(saveTimer); saveTimer = setTimeout(() => saveChanges(), 1200);
+  clearTimeout(saveTimer); saveTimer = setTimeout(() => saveChanges(), 2500);
 }
 async function requestJSON(path, options = {}) {
   const controller=new AbortController(),upstream=options.signal;

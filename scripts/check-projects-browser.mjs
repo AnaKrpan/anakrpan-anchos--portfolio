@@ -264,7 +264,11 @@ try{
   await page.getByLabel('Naslov videa — HR',{exact:true}).fill('Probni video');await page.getByLabel('Naslov videa — EN',{exact:true}).fill('Test video');await page.getByLabel('Jezik videa',{exact:true}).selectOption('hr');await page.getByLabel('Stanje nakon objave',{exact:true}).selectOption('published');
   await page.getByRole('button',{name:'Pregled HR',exact:true}).click();await page.locator('.project-preview-dialog .video-start').click();
   await page.waitForFunction(()=>{const v=document.querySelector('.project-preview-dialog video');return v&&v.videoWidth===180&&v.videoHeight===320;});
+  const sourceBeforeClose=await page.locator('.project-preview-dialog video').getAttribute('data-media-src');
+
   await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();
+  await page.waitForFunction(()=>[...document.querySelectorAll('.project-preview-dialog video')].every(v=>!v.getAttribute('src')));
+  assert.equal(await page.locator('.project-preview-dialog video').getAttribute('data-media-src'),sourceBeforeClose,'Closing preview must cancel download while retaining its original source');
   await page.getByRole('button',{name:'Pregled EN',exact:true}).click();assert.match(await page.locator('.project-preview-dialog').innerText(),/Croatian-language content/);await page.getByRole('button',{name:/^(Zatvori pregled|Close preview)$/}).click();
   await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);
   let pub=await publicData();assert.equal(pub.projects.filter(p=>p.id===id).length,1);assert.equal(pub.projects.find(p=>p.id===id).status,'published');assert(pub.categories.some(c=>c.hr==='Probna industrija'&&c.en==='Test industry'));assert.equal((await anonymous.request.get(origin+file,{headers:{range:'bytes=0-31'}})).status(),206);

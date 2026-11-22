@@ -72,7 +72,7 @@ try{
     await page.goto(origin+'/uredi?lang=en');await page.waitForFunction(()=>document.body.classList.contains('editing'));
     assert.equal(await page.locator('html').getAttribute('lang'),'hr');assert.equal(await page.locator('.language-switch').isVisible(),false);
     await page.locator('.intro-copy h2').fill('Provjera privatnog nacrta');
-    await page.waitForTimeout(1600);assert(writes.length>0);const saved=writes.at(-1).document;
+    await page.waitForTimeout(3000);assert(writes.length>0);const saved=writes.at(-1).document;
     assert(saved.texts.includes('Provjera privatnog nacrta'));assert(saved.texts.includes('KREATORICA SADRŽAJA<br>UGC KREATOR<br>INFLUENCER'));
     assert.deepEqual(saved.videos.map(v=>v.src),data.document.videos.map(v=>v.src));assert.equal(saved.collaborations.items[0].comment,hr.collaborations.items[0].comment);
     assert.deepEqual(errors,[]);console.log(JSON.stringify({viewport,croatianRestoredExactly:true,allCurrentTextTranslated:true,mediaUnchanged:true,noLanguageNetworkRequests:true,privateCroatianEditingPreserved:true}));await page.close();

@@ -149,3 +149,15 @@ test('only the empty generated Barkode duplicate is retired; completed work and 
   assert.deepEqual(upgradeProjects(uploaded).projects.find(p=>p.id==='barkode'),uploaded.projects.find(p=>p.id==='barkode'));
   const alone=upgradeProjects(baseline);assert.equal(alone.projects.find(p=>p.id==='barkode').status,'draft');
 });
+
+test('reopening preview storage never attempts another initialization write and state reads remain fresh after edits',async()=>{
+  const primary=new Store(),isolated=new Store();
+  await primary.setJSON('state',{published:{document:baseline,revision:91},draft:{document:baseline,revision:99}});
+  await previewStore(primary,isolated);
+  let attempts=0;const setJSON=isolated.setJSON.bind(isolated);isolated.setJSON=async(...args)=>{attempts++;return setJSON(...args);};
+  const adapter=await previewStore(primary,isolated);assert.equal(attempts,0);
+  assert.equal((await adapter.getWithMetadata('state',{type:'json'})).data.published.revision,91);
+  await adapter.setJSON('state',{published:{revision:92}});
+  assert.equal((await adapter.get('state',{type:'json'})).published.revision,92);
+  await previewStore(primary,isolated);assert.equal(attempts,1);
+});
