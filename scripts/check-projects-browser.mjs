@@ -295,6 +295,20 @@ try{
   await guestPage.waitForURL('**/prijava.html?pregled=nacrt');
   assert.equal(await guestPage.locator('[data-project-id="holiday-house-the-view"]').count(),0);
   await guestPage.close();
+
+  const beforeReset=await(await context.request.get(origin+'/api/draft')).json();
+  delete beforeReset.document.originalVideoReplacements;
+  const resetProposal=globalThis.PortfolioProjectModel.prepare1080ReplacementSlots(beforeReset.document);
+  const publishedBeforeReset=await publicData();
+  assert.equal((await context.request.put(origin+'/api/draft',{headers:{origin},data:{document:beforeReset.document,revision:beforeReset.revision}})).status(),200);
+  const replacementPage=await context.newPage();await replacementPage.goto(origin+'/uredi');
+  await replacementPage.waitForFunction(async()=>{const d=await(await fetch('/api/draft')).json();return d.document.originalVideoReplacements?.applied&&d.document.projects.find(p=>p.id==='holiday-house-the-view').videos[1].src==='';});
+  const resetDoc=(await(await context.request.get(origin+'/api/draft')).json()).document;
+  assert.deepEqual(resetDoc.projects,resetProposal.document.projects,'Only the three requested source strings may change');
+  assert.deepEqual(resetDoc.originalVideoReplacements.archive,resetProposal.document.originalVideoReplacements.archive);
+  for(const target of resetProposal.targets)if(target.before.src)assert(await isolated.get('media/'+target.before.src.slice(7)),'Retained originals must still exist');
+  assert.deepEqual(await publicData(),publishedBeforeReset,'Preparing upload slots must not publish draft changes');
+  await replacementPage.close();
   const preserved=(await isolated.get('state')).draft.document;assert.deepEqual(preserved.texts,baseline.texts);assert.deepEqual(preserved.photos,baseline.photos);assert.deepEqual(preserved.collaborations,baseline.collaborations);assert.equal(preserved.email,baseline.email);
   assert.deepEqual(await primary.get('state'),originalState);assert.equal(primary.writes,originalWrites);assert.deepEqual(errors,[]);
   console.log(JSON.stringify({viewport,fiveOriginalVideosPreserved:true,filtersAndLanguages:true,privateDraft:true,HRandENPreviewRequired:true,comingSoonConvertedWithSameId:true,uploadBytesUnchanged:true,privateVideoProtected:true,categoryCreation:true,verticalVideoPlayback:true,productionStoreUntouched:true}));
