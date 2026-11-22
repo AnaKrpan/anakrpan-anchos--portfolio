@@ -51,6 +51,10 @@ try{
   assert.equal(await page.locator('#project-gallery > .project-upcoming-section .project-coming').count(),2);
   assert.equal(await page.locator('#project-gallery > .project-card.project-coming').count(),0);
   assert.equal(await page.locator('#project-gallery > :last-child').getAttribute('class'),'project-upcoming-section');
+  if(viewport.width<=600){
+    const boxes=await page.locator('#project-gallery .project-upcoming-grid > .project-coming').evaluateAll(cards=>cards.map(c=>{const r=c.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,right:r.right,overflow:c.scrollWidth>c.clientWidth};}));
+    assert.equal(boxes.length,2);assert(Math.abs(boxes[0].y-boxes[1].y)<1,'Mobile announcements must share a row');assert(boxes[1].x>=boxes[0].right,'Mobile announcements must not overlap');assert(boxes.every(b=>b.width<viewport.width/2&&!b.overflow),'Mobile announcements must be compact without clipping');
+  }
   await page.evaluate(()=>{window.originalGalleryVideos=[...document.querySelectorAll('#project-gallery video')];});
   assert.equal(await page.locator('#contact-phone').getAttribute('href'),'tel:+385911513866');
   const photos=await page.locator('[data-photo]').evaluateAll(images=>images.map(i=>i.getAttribute('src')));assert.deepEqual(photos,baseline.photos.map(p=>p.src));
