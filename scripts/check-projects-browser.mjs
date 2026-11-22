@@ -165,7 +165,7 @@ try{
     await page.getByLabel('Dodaj / zamijeni naslovnicu',{exact:true}).nth(i).setInputFiles({name:'private-holiday-cover-'+i+'.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.cover,'base64')});
     await page.waitForFunction(async index=>{const d=await(await fetch('/api/draft')).json();return !!d.document.projects.find(p=>p.id==='holiday-house-the-view').videos[index].poster;},i);
   }
-  await page.waitForFunction(()=>!projectEditor.busy(),{},{timeout:180000});
+  await page.waitForFunction(()=>!projectEditor.busy()&&!dirty&&!saving,{},{timeout:180000});
   const holidayDraft=(await(await context.request.get(origin+'/api/draft')).json()).document.projects.find(p=>p.id==='holiday-house-the-view');
   assert.equal(holidayDraft.status,'draft');assert(holidayDraft.videos.every(v=>v.src&&v.poster),JSON.stringify({videos:holidayDraft.videos,progress:await page.locator('#project-editor [data-transfer-key] [role=status]').allTextContents()}));
   if(androidLarge){

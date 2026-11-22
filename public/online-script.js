@@ -192,7 +192,7 @@ projectGallery=PortfolioProjectGallery.mount(document.querySelector('#project-ga
 projectEditor=PortfolioProjectEditor.mount(document.querySelector('#project-editor'),{
   change:markDirty,refresh:renderProjectGallery,message,
   fullPreview:lang=>{if(projectSandbox&&editing){const x=scrollX,y=scrollY;const switching=['hr','en'].includes(lang);if(switching)privateGalleryLanguage=lang;renderProjectGallery();if(switching)scrollTo({left:x,top:y,behavior:'instant'});else document.querySelector('#private-gallery-preview-notice').scrollIntoView({behavior:'smooth',block:'start'});}},
-  save:async()=>{let result=await saveChanges();if(result===false)return false;if(dirty)result=await saveChanges();return result;},
+  save:async()=>{while(saving||dirty){if(saving){if(await saving===false)return false;await new Promise(resolve=>setTimeout(resolve,0));}else if(await saveChanges()===false)return false;}return true;},
   publish:id=>requestJSON('/api/projects/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,revision})}),
   upload:async(file,type,report)=>{pendingFiles++;setSaveButton();try{return await uploadFile(file,type,report);}finally{pendingFiles--;setSaveButton();}}
 });
