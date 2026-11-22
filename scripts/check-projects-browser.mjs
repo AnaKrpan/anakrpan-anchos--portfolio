@@ -45,6 +45,7 @@ try{
   const publicData=async()=>{const r=await context.request.get(origin+'/api/content');return (await r.json()).document;};
   await page.goto(origin);await page.waitForFunction(()=>document.querySelector('#project-gallery [data-project-id]'));
   const publicBefore=await publicData();assert.equal(publicBefore.phone,'+385 91 151 3866');assert(!JSON.stringify(publicBefore).includes('holiday-house-the-view'));
+  assert.equal(await page.locator('#gallery-playback-note').innerText(),"Videi su optimizirani za brzu reprodukciju. Originalne 4K verzije dostupne su na zahtjev.");
   assert.equal(await page.locator('#project-gallery .project-video video').count(),5);
   assert.deepEqual(await page.locator('#project-gallery .project-video video').evaluateAll(vs=>vs.map(v=>v.dataset.mediaSrc)),[0,2,1,4,3].map(i=>baseline.videos[i].src));
   assert.equal(await page.getByRole('button',{name:'Smještaj i putovanja',exact:true}).count(),0);
@@ -108,6 +109,7 @@ try{
   await page.evaluate(()=>{window.savedDraftScroll=scrollY;[...document.querySelectorAll('#project-editor button')].find(b=>b.textContent==='Galerija EN').click();});
   assert(Math.abs(await page.evaluate(()=>scrollY-window.savedDraftScroll))<2,'Switching private preview language must preserve scroll position');
   assert.equal(await page.locator('#project-filters button:visible').nth(1).innerText(),'Travel & Hospitality');
+  assert.equal(await page.locator('#gallery-playback-note').innerText(),"Videos are optimized for smooth playback. Original 4K versions are available upon request.");
   const holidayEnglish=page.locator('#project-gallery [data-project-id="holiday-house-the-view"]');
   assert.equal(await holidayEnglish.locator('.project-title').innerText(),'One Location. Three Creative Approaches.');
   assert.deepEqual(await holidayEnglish.locator('.project-video-title').allTextContents(),['UGC Promotional Video','Aesthetic Property Showcase','Influencer Experience & Review']);
@@ -278,12 +280,14 @@ try{
   const beforeClientView=structuredClone(await isolated.get('state')),writesBeforeClientView=isolated.writes;
   const clientPage=await context.newPage();await clientPage.goto(origin+'/?pregled=nacrt');
   await clientPage.waitForFunction(()=>document.querySelector('#project-gallery [data-project-id="holiday-house-the-view"] video'));
+  assert.equal(await clientPage.locator('#gallery-playback-note').innerText(),"Videi su optimizirani za brzu reprodukciju. Originalne 4K verzije dostupne su na zahtjev.");
   assert.equal(await clientPage.locator('#editor-panel').isVisible(),false);
   assert.equal(await clientPage.locator('[contenteditable=true]').count(),0);
   assert.equal(await clientPage.locator('#start-edit').isVisible(),false);
   assert.equal(await clientPage.locator('#project-gallery > .project-card').first().getAttribute('data-project-id'),'holiday-house-the-view');
   assert.equal(await clientPage.locator('#project-gallery [data-project-id="holiday-house-the-view"] video').count(),3);
   await clientPage.getByRole('button',{name:'English',exact:true}).click();
+  assert.equal(await clientPage.locator('#gallery-playback-note').innerText(),"Videos are optimized for smooth playback. Original 4K versions are available upon request.");
   assert.equal(await clientPage.locator('#project-gallery [data-project-id="holiday-house-the-view"] .project-title').innerText(),'One Location. Three Creative Approaches.');
   assert.deepEqual(await isolated.get('state'),beforeClientView);assert.equal(isolated.writes,writesBeforeClientView,'Readonly client preview must not save or publish');
   await clientPage.close();

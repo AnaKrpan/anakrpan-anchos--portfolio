@@ -5,6 +5,7 @@ function renderProjectGallery(){
   const privatePreview=projectSandbox&&(clientDraftPreview||(editing&&location.pathname==='/uredi'));
   const previewLanguage=privatePreview&&!clientDraftPreview?privateGalleryLanguage:PortfolioLanguage.language;
   projectGallery.render(projectDocument,previewLanguage,{includeDrafts:privatePreview,clientPreview:clientDraftPreview});
+  const playbackNote=document.querySelector('#gallery-playback-note');if(playbackNote)playbackNote.textContent=previewLanguage==='en'?"Videos are optimized for smooth playback. Original 4K versions are available upon request.":"Videi su optimizirani za brzu reprodukciju. Originalne 4K verzije dostupne su na zahtjev.";
   let notice=document.querySelector('#private-gallery-preview-notice');
   if(privatePreview&&!notice){notice=document.createElement('p');notice.id='private-gallery-preview-notice';notice.className='sandbox-notice';document.querySelector('#project-filters').before(notice);}
   if(notice){notice.hidden=!privatePreview;notice.textContent=previewLanguage==='en'?'PRIVATE DRAFT PREVIEW — visible only while signed in. Nothing is published.':'PRIVATNI PREGLED NACRTA — vidljiv samo nakon prijave. Ništa nije objavljeno.';}

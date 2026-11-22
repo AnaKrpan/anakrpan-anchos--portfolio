@@ -576,3 +576,5 @@ window.PortfolioEnglishTranslations=[
     "Pero"
   ]
 ];
+
+window.PortfolioEnglishTranslations.push(["Videi su optimizirani za brzu reprodukciju. Originalne 4K verzije dostupne su na zahtjev.","Videos are optimized for smooth playback. Original 4K versions are available upon request."]);
