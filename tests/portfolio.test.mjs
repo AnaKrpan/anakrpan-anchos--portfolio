@@ -213,3 +213,24 @@ test('changing a draft archives previous state and never deletes its existing me
   assert.deepEqual((await (await env.call('/api/content')).json()).document,initialDocument);
 });
 
+
+test('new video ranges read ahead with bounded parallelism, exact bytes and private access',async()=>{
+  const env=setup();await env.login();
+  const id='77777777-7777-4777-8777-777777777777',file=id+'.mp4',partSize=1024,bytes=Uint8Array.from({length:partSize*12},(_,i)=>i%251);
+  await env.store.setJSON('media/'+file,{id,size:bytes.length,type:'video/mp4',partSize,count:12});
+  for(let n=1;n<=12;n++)await env.store.set('parts/'+id+'/'+n,bytes.slice((n-1)*partSize,n*partSize));
+  let active=0,peak=0,reads=0;const originalGet=env.store.get.bind(env.store);
+  env.store.get=async(key,options)=>{
+    if(!key.startsWith('parts/'+id+'/'))return originalGet(key,options);
+    active++;reads++;peak=Math.max(peak,active);
+    try{await new Promise(resolve=>setTimeout(resolve,5));return await originalGet(key,options);}finally{active--;}
+  };
+  assert.equal((await env.call('/media/'+file,{auth:false})).status,401);assert.equal(reads,0);
+  const response=await env.call('/media/'+file,{headers:{range:'bytes=30-10270'}});
+  assert.equal(response.status,206);assert.deepEqual(new Uint8Array(await response.arrayBuffer()),bytes.slice(30,10271));
+  assert(peak>1&&peak<=4,'Parts must overlap without unbounded parallel requests');assert.equal(reads,11);
+  reads=0;const small=await env.call('/media/'+file,{headers:{range:'bytes=1025-1030'}});
+  assert.deepEqual(new Uint8Array(await small.arrayBuffer()),bytes.slice(1025,1031));assert.equal(reads,1);
+  const head=await env.call('/media/'+file,{method:'HEAD'});assert.equal(await head.text(),'');assert.equal(reads,1);
+  reads=0;const cancelled=await env.call('/media/'+file);await cancelled.body.cancel();await new Promise(resolve=>setTimeout(resolve,15));assert(reads<=4,'Cancelled playback must stop reading additional parts');
+});

@@ -462,20 +462,33 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         }
         headers.set('content-length', String(end - start + 1));
         if (request.method === 'HEAD') return new Response(null, { headers });
-        let offset = start;
-        const body = new ReadableStream({
-          async pull(controller) {
-            try {
-              if (offset > end) { controller.close(); return; }
-              const part = Math.floor(offset / partSize) + 1;
-              const buffer = await get(partKey(storedManifest.id, part), 'arrayBuffer');
-              if (!buffer) throw new Error('Nedostaje dio datoteke.');
-              const bytes = new Uint8Array(buffer), within = offset % partSize, length = Math.min(bytes.length - within, end - offset + 1);
-              if (length < 1) throw new Error('Neispravna datoteka.');
-              controller.enqueue(bytes.subarray(within, within + length)); offset += length;
-              if (offset > end) controller.close();
-            } catch (error) { controller.error(error); }
+        let offset=start,stopped=false,nextPart=Math.floor(start/partSize)+1;
+        const lastPart=Math.floor(end/partSize)+1;
+        const windowSize=Math.max(1,Math.min(4,Math.floor(4*1024*1024/partSize)));
+        const pending=new Map();
+        function prefetch(){
+          while(!stopped&&nextPart<=lastPart&&pending.size<windowSize){
+            const part=nextPart++;
+            // Settled results avoid unhandled rejections if the player cancels a range.
+            pending.set(part,Promise.resolve().then(()=>get(partKey(storedManifest.id,part),'arrayBuffer')).then(buffer=>({buffer}),error=>({error})));
           }
+        }
+        const body=new ReadableStream({
+          start(){prefetch();},
+          async pull(controller){
+            try{
+              if(stopped)return;
+              const part=Math.floor(offset/partSize)+1,result=await pending.get(part);
+              if(stopped)return;
+              if(result?.error)throw result.error;
+              if(!result?.buffer)throw new Error('Nedostaje dio datoteke.');
+              const bytes=new Uint8Array(result.buffer),within=offset%partSize,length=Math.min(bytes.length-within,end-offset+1);
+              if(length<1)throw new Error('Neispravna datoteka.');
+              controller.enqueue(bytes.subarray(within,within+length));offset+=length;pending.delete(part);
+              if(offset>end){stopped=true;pending.clear();controller.close();}else prefetch();
+            }catch(error){stopped=true;pending.clear();controller.error(error);}
+          },
+          cancel(){stopped=true;pending.clear();}
         });
         return new Response(body, { status, headers });
       }
