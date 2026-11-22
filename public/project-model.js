@@ -43,7 +43,7 @@
     result.projects.push(biljarica,pet);result.brandRowsOrderInitialized=true;return result;
   }
   function publicDocument(doc){
-    const out=copy(doc);if(!out.projects)return out;
+    const out=copy(doc);if(out.originalVideoReplacements)out.originalVideoReplacements={applied:true};if(!out.projects)return out;
     out.projects=out.projects.filter(p=>['published','comingSoon'].includes(p.status)).map(p=>{
       delete p.privateClient;delete p.reviewed;delete p.needsReview;if(p.hideClient)p.client='';
       if(p.status==='comingSoon')p.videos=[];
@@ -76,5 +76,28 @@
       }
     }
   }
-  root.PortfolioProjectModel={categories,types,copy,pair,emptyProject,emptyVideo,upgrade,publicDocument,refs,visible,local,reviewPayload,validate,safeLink,safeSource,safePoster};
+
+  function prepare1080ReplacementSlots(doc){
+    if(doc.originalVideoReplacements?.applied)return {alreadyApplied:true,document:copy(doc),targets:[]};
+    const out=copy(doc),active=out.projects.filter(p=>p.status!=='archived'&&!p.retiredEmptyBarkodeTemplate);
+    const name=p=>[p.client,p.title?.hr,p.title?.en].join(' ');
+    const choose=(pairs,label)=>{
+      const linked=pairs.filter(({video})=>!!video.src),pool=linked.length?linked:pairs;
+      if(pool.length!==1)throw new Error(label+': videomjesto nije jednoznačno prepoznato. Ništa nije odspojeno.');
+      return pool[0];
+    };
+    const holiday=active.find(p=>p.id==='holiday-house-the-view');
+    if(!holiday?.videos[1]||!((holiday.videos[1].types||[]).includes('Aesthetic Showcase')||/aesthetic|estets/i.test(JSON.stringify(holiday.videos[1].title))))throw new Error('Drugo estetsko Holiday videomjesto nije potvrđeno. Ništa nije odspojeno.');
+    const barkodeProjects=active.filter(p=>/\bbarkode\b/i.test(name(p)));
+    let barkode=barkodeProjects.flatMap(project=>project.videos.filter(v=>v.types.includes('Affiliate Marketing')).map(video=>({project,video})));
+    if(!barkode.length)barkode=barkodeProjects.flatMap(project=>project.videos.filter(v=>v.types.includes('Influencer Marketing')).map(video=>({project,video})));
+    const jewelry=active.filter(p=>p.id==='jewelry-accessories'||p.category==='jewelry'||/naušnic|earrings|nakit/i.test(name(p))).flatMap(project=>project.videos.filter(v=>v.types.includes('Influencer Marketing')).map(video=>({project,video})));
+    const targets=[{project:holiday,video:holiday.videos[1]},choose(barkode,'Barkode'),choose(jewelry,'Naušnice')];
+    if(new Set(targets.map(t=>t.project.id+':'+t.video.id)).size!==3)throw new Error('Tri različita videomjesta nisu potvrđena. Ništa nije odspojeno.');
+    const archive=targets.map(({project,video})=>({projectId:project.id,videoId:video.id,before:copy(video)}));
+    targets.forEach(({video})=>video.src='');
+    out.originalVideoReplacements={applied:true,request:'three-1080-slots-2026-11-22',archive};
+    return {document:out,targets:archive};
+  }
+  root.PortfolioProjectModel={categories,types,copy,pair,emptyProject,emptyVideo,upgrade,publicDocument,refs,visible,local,reviewPayload,validate,safeLink,safeSource,safePoster,prepare1080ReplacementSlots};
 })(globalThis);

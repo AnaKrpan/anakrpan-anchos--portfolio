@@ -40,6 +40,7 @@
       const result=await options.publish(p.id);message(result.sandbox?'Objavljeno samo u probnom okruženju. Javna stranica nije promijenjena.':'Projekt je objavljen na postojećem javnom linku.');renderList();
     }
     button('＋ Novi projekt',()=>{if(!doc)return;const p=M.emptyProject();p.order=doc.projects.length;doc.projects.push(p);currentId=p.id;changed(p);renderForm();});
+    button('Pripremi 3 mjesta za 1080p',()=>options.prepareReplacements?.());
     button('Spremi nacrt',async()=>{const saved=await options.save();if(saved!==false)message('Privatni nacrt spremljen. Nove izmjene još nisu objavljene.');});
     button('Pregled cijele galerije',()=>options.fullPreview?.());
     button('Galerija HR',()=>options.fullPreview?.('hr'));button('Galerija EN',()=>options.fullPreview?.('en'));

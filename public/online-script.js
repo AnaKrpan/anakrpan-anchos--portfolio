@@ -197,9 +197,33 @@ async function saveChanges() {
 }
 const uploads = PortfolioUploads.createUploader({request:requestJSON});
 const uploadFile = (file,type,report=message) => uploads.upload(file,type,report);
+
+let preparing1080Slots=false;
+async function prepare1080Slots(){
+  if(!projectSandbox||!canEdit||location.pathname!=='/uredi'||preparing1080Slots||projectDocument?.originalVideoReplacements?.applied)return;
+  preparing1080Slots=true;
+  const before=projectDocument,beforeSerial=serial;
+  try{
+    const proposal=PortfolioProjectModel.prepare1080ReplacementSlots(before);
+    const checks=await Promise.allSettled(proposal.targets.filter(t=>t.before.src).map(async target=>{
+      const src=target.before.src;
+      if(!/^\/media\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(src))throw new Error('Postojeća datoteka nije u potvrđenoj pohrani.');
+      const response=await fetch(src,{method:'HEAD',credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(35000)});
+      if(!response.ok||Number(response.headers.get('content-length'))<=0)throw new Error('Dostupnost izvorne datoteke nije potvrđena.');
+    }));
+    if(checks.some(result=>result.status==='rejected'))throw new Error('Provjera datoteka nije uspjela. Ništa nije odspojeno; pokušaj ponovno.');
+    if(before!==projectDocument||beforeSerial!==serial||pendingFiles||projectEditor.busy())throw new Error('Uređivanje ili prijenos je u tijeku. Ništa nije odspojeno. Ponovi pripremu kada završi.');
+    projectDocument=proposal.document;projectEditor.setDocument(projectDocument);renderProjectGallery();markDirty();
+    const saved=await saveChanges();
+    message(saved===true?'Tri mjesta su pripremljena za 1080p videe. Prvi i treći Holiday video te svi ostali podaci ostaju sačuvani. Izvornici nisu izbrisani.':'Mjesta su pripremljena u ovoj kartici, ali spremanje nije potvrđeno. Pritisni Spremi nacrt prije zatvaranja. Stare poveznice su sačuvane u nacrtu.');
+  }catch(error){message(error.message);}
+  finally{preparing1080Slots=false;}
+}
+
 projectGallery=PortfolioProjectGallery.mount(document.querySelector('#project-gallery'),document.querySelector('#project-filters'));
 projectEditor=PortfolioProjectEditor.mount(document.querySelector('#project-editor'),{
   change:markDirty,refresh:renderProjectGallery,message,
+  prepareReplacements:prepare1080Slots,
   fullPreview:lang=>{if(projectSandbox&&editing){const x=scrollX,y=scrollY;const switching=['hr','en'].includes(lang);if(switching)privateGalleryLanguage=lang;renderProjectGallery();if(switching)scrollTo({left:x,top:y,behavior:'instant'});else document.querySelector('#private-gallery-preview-notice').scrollIntoView({behavior:'smooth',block:'start'});}},
   save:async()=>{if(!canEdit){message('Prijava za uređivanje više nije potvrđena. Podaci ostaju u otvorenoj kartici.');return false;}for(let attempt=0;attempt<4;attempt++){if(saving){if(await saving===false)return false;await new Promise(resolve=>setTimeout(resolve,0));}else if(await saveChanges()===false)return false;if(!saving&&!dirty)return true;await new Promise(resolve=>setTimeout(resolve,50));}message('Još postoje nove izmjene. Ponovno pritisni Spremi nacrt; podaci su zadržani.');return false;},
   publish:id=>requestJSON('/api/projects/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,revision})}),
@@ -307,7 +331,7 @@ const draftReady = (async () => {
     document.querySelector('#start-edit').hidden=!canEdit;
     document.querySelector('#owner-signin').hidden=canEdit||clientDraftPreview;
     globalNotice.hidden=true; setSaveButton();
-    if(canEdit && location.pathname==='/uredi')setEditing(true);
+    if(canEdit && location.pathname==='/uredi'){setEditing(true);await prepare1080Slots();}
     if(canEdit && location.pathname==='/uredi' && session.migrationNeeded) {
       // Production-only migration preserves both published and draft documents.
       requestJSON('/api/originals/migrate',{method:'POST'}).then(()=>{

@@ -161,3 +161,25 @@ test('reopening preview storage never attempts another initialization write and 
   assert.equal((await adapter.get('state',{type:'json'})).published.revision,92);
   await previewStore(primary,isolated);assert.equal(attempts,1);
 });
+
+test('three replacement slots unlink only requested sources, retain every other field, archive originals and never detach new uploads twice',()=>{
+  const doc=upgradeProjects(baseline),holiday=doc.projects.find(p=>p.id==='holiday-house-the-view'),barkode=doc.projects.find(p=>p.id==='barkode'),jewelry=doc.projects.find(p=>p.id==='jewelry-accessories');
+  holiday.videos.forEach((v,i)=>v.src=baseline.videos[i].src);
+  barkode.videos[0].src=baseline.videos[3].src;jewelry.videos[0].src=baseline.videos[4].src;
+  const before=M.copy(doc),result=M.prepare1080ReplacementSlots(doc),after=result.document;
+  assert.deepEqual(doc,before);assert.equal(result.targets.length,3);
+  assert.deepEqual(after.projects.find(p=>p.id===holiday.id).videos[0],holiday.videos[0]);
+  assert.deepEqual(after.projects.find(p=>p.id===holiday.id).videos[2],holiday.videos[2]);
+  const selected=new Set(result.targets.map(t=>t.projectId+':'+t.videoId));
+  for(const p of before.projects){
+    const expected=M.copy(p);expected.videos.forEach(v=>{if(selected.has(p.id+':'+v.id))v.src='';});
+    assert.deepEqual(after.projects.find(next=>next.id===p.id),expected);
+  }
+  assert.deepEqual(after.originalVideoReplacements.archive.map(t=>t.before.src),[holiday.videos[1].src,barkode.videos[0].src,jewelry.videos[0].src]);
+  after.projects.find(p=>p.id===holiday.id).videos[1].src='/media/99999999-9999-4999-8999-999999999999.mp4';
+  assert(M.prepare1080ReplacementSlots(after).alreadyApplied);
+  assert.equal(M.prepare1080ReplacementSlots(after).document.projects.find(p=>p.id===holiday.id).videos[1].src,'/media/99999999-9999-4999-8999-999999999999.mp4');
+  assert.deepEqual(M.publicDocument(after).originalVideoReplacements,{applied:true});
+  const ambiguous=M.copy(doc),duplicate=M.copy(barkode);duplicate.id='another-barkode';ambiguous.projects.push(duplicate);
+  assert.throws(()=>M.prepare1080ReplacementSlots(ambiguous),/jednoznačno/);assert.deepEqual(ambiguous.projects.find(p=>p.id===holiday.id),holiday);
+});
