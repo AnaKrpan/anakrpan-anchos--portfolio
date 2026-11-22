@@ -259,6 +259,11 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         if(!project||!['published','comingSoon','archived'].includes(project.status))fail(400,'Odaberi Gotov rad ili Uskoro prije objave.');
         const doc=upgraded(state.published?.document||initialDocument);
         doc.projects=doc.projects.filter(p=>p.id!==project.id);doc.projects.push(ProjectModel.copy(project));
+        // Apply saved ordering without exposing other projects' draft edits.
+        for(const publishedProject of doc.projects){
+          const position=draft.projects.find(p=>p.id===publishedProject.id);
+          if(position)publishedProject.order=position.order;
+        }
         const category=draft.categories.find(c=>c.id===project.category);
         if(category){doc.categories=doc.categories.filter(c=>c.id!==category.id);doc.categories.push(ProjectModel.copy(category));}
         ProjectModel.validate(doc,true);await checkReview(project);

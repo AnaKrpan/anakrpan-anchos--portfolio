@@ -45,7 +45,7 @@ try{
   await page.goto(origin);await page.waitForFunction(()=>document.querySelector('#project-gallery [data-project-id]'));
   const publicBefore=await publicData();assert.equal(publicBefore.phone,'+385 91 151 3866');assert(!JSON.stringify(publicBefore).includes('holiday-house-the-view'));
   assert.equal(await page.locator('#project-gallery .project-video video').count(),5);
-  assert.deepEqual(await page.locator('#project-gallery .project-video video').evaluateAll(vs=>vs.map(v=>v.dataset.mediaSrc)),baseline.videos.map(v=>v.src));
+  assert.deepEqual(await page.locator('#project-gallery .project-video video').evaluateAll(vs=>vs.map(v=>v.dataset.mediaSrc)),[0,2,1,4,3].map(i=>baseline.videos[i].src));
   assert.equal(await page.getByRole('button',{name:'Turizam i smještaj',exact:true}).count(),0);
   assert.equal(await page.locator('.project-coming .video-start').count(),0);
   assert.equal(await page.locator('#project-gallery > .project-upcoming-section .project-coming').count(),2);
@@ -55,6 +55,17 @@ try{
     const boxes=await page.locator('#project-gallery .project-upcoming-grid > .project-coming').evaluateAll(cards=>cards.map(c=>{const r=c.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,right:r.right,overflow:c.scrollWidth>c.clientWidth};}));
     assert.equal(boxes.length,2);assert(Math.abs(boxes[0].y-boxes[1].y)<1,'Mobile announcements must share a row');assert(boxes[1].x>=boxes[0].right,'Mobile announcements must not overlap');assert(boxes.every(b=>b.width<viewport.width/2&&!b.overflow),'Mobile announcements must be compact without clipping');
   }
+
+  assert.deepEqual(await page.locator('#project-gallery > .project-card').evaluateAll(cards=>cards.map(c=>c.dataset.projectId)),['legacy-1','legacy-3','legacy-2','legacy-5','legacy-4']);
+  const brandRows=await page.locator('#project-gallery > .project-card').evaluateAll(cards=>cards.map(c=>{const r=c.getBoundingClientRect();return {top:r.top,bottom:r.bottom};}));
+  assert(brandRows.every((row,i)=>i===0||row.top>=brandRows[i-1].bottom),'Each brand must start a new row');
+  const flova=page.locator('#project-gallery [data-project-id="legacy-1"]');
+  assert.equal(await flova.locator('.project-videos > .project-inline-announcement').count(),1);
+  assert.equal(await flova.locator('.project-inline-announcement video,.project-inline-announcement button').count(),0);
+  if(viewport.width<=600){
+    const layout=await flova.locator('.project-videos').evaluate(el=>{const [v,n]=el.children;const vr=v.getBoundingClientRect(),nr=n.getBoundingClientRect();return {videoWidth:vr.width,sameRow:Math.abs(vr.top-nr.top)<1,scrollable:el.scrollWidth>el.clientWidth};});
+    assert(layout.videoWidth>=200&&layout.sameRow&&layout.scrollable,'Mobile brand videos must stay readable and scroll horizontally');
+  }
   await page.evaluate(()=>{window.originalGalleryVideos=[...document.querySelectorAll('#project-gallery video')];});
   assert.equal(await page.locator('#contact-phone').getAttribute('href'),'tel:+385911513866');
   const photos=await page.locator('[data-photo]').evaluateAll(images=>images.map(i=>i.getAttribute('src')));assert.deepEqual(photos,baseline.photos.map(p=>p.src));
@@ -62,6 +73,8 @@ try{
   await page.getByRole('button',{name:'Hrvatski',exact:true}).click();assert.equal(await page.locator('#project-gallery .project-card:visible').count(),2);assert.equal(videoRequests,0);
   assert.equal(await page.locator('#project-gallery > .project-upcoming-section').count(),0);
   assert.equal(await page.locator('#project-gallery > .project-card.project-coming:visible').count(),1);
+  assert.equal(await page.locator('#project-gallery').evaluate(el=>el.classList.contains('projects-all-work')),false);
+  assert.equal(await page.locator('#project-gallery .project-inline-announcement').count(),0);
   await page.getByRole('button',{name:'Svi radovi',exact:true}).click();
   assert.equal(await page.locator('#project-gallery > .project-upcoming-section .project-coming:visible').count(),2);
   assert.equal(await page.locator('#project-gallery > .project-upcoming-section > h3').innerText(),'Uskoro');
@@ -77,6 +90,21 @@ try{
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Mobile editor must not overflow horizontally');
   await page.locator('[data-edit-project="holiday-house-the-view"]').click();await page.getByRole('button',{name:'Pregled HR',exact:true}).click();
   assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
+
+  await page.locator('[data-edit-project="legacy-1"]').click();
+  await page.getByRole('button',{name:'Dodaj gotov video umjesto najave',exact:true}).click();
+  assert.equal(await page.locator('#project-editor fieldset').count(),2);
+  await page.getByRole('button',{name:'Spremi nacrt',exact:true}).click();await page.waitForTimeout(500);
+  const convertedDraft=(await(await context.request.get(origin+'/api/draft')).json()).document.projects.find(p=>p.id==='legacy-1');
+  assert.equal(convertedDraft.videos.length,2);assert.equal(convertedDraft.upcoming.hr,'');assert.equal(convertedDraft.videos[1].src,'');
+  assert.equal((await publicData()).projects.find(p=>p.id==='legacy-1').videos.length,1);
+  await page.locator('[data-edit-project="legacy-3"]').click();await page.getByRole('button',{name:'↑ Gore',exact:true}).click();
+  for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();}
+  await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(500);
+  const reordered=(await publicData()).projects.filter(p=>p.legacySlot).sort((a,b)=>a.order-b.order);
+  assert.deepEqual(reordered.map(p=>p.id),['legacy-3','legacy-1','legacy-2','legacy-5','legacy-4']);
+  assert.equal(reordered.find(p=>p.id==='legacy-1').videos.length,1,'Reordering must not publish another brand unfinished video');
+
   await page.getByText('Upravljaj kategorijama',{exact:true}).click();await page.getByRole('button',{name:'＋ Nova kategorija',exact:true}).click();
   const categoryRow=page.locator('#project-editor details .project-fields').last();await categoryRow.getByLabel('Naziv HR',{exact:true}).fill('Probna industrija');await categoryRow.getByLabel('Naziv EN',{exact:true}).fill('Test industry');
   await page.getByText('Upravljaj kategorijama',{exact:true}).click();

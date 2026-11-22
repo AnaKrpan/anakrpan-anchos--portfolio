@@ -75,6 +75,11 @@
       field(fields,'Prikaži na',p.visibility,v=>{p.visibility=v;changed(p);},{choices:[['both','HR i EN'],['hr','Samo HR'],['en','Samo EN']]});
       field(fields,'Istaknuti projekt',p.featured?'yes':'no',v=>{p.featured=v==='yes';changed(p);},{choices:[['no','Ne'],['yes','Da']]});
       bilingual(fields,'Najava dodatnog videa unutar projekta',p.upcoming||M.pair(),(lang,v)=>{p.upcoming??=M.pair();p.upcoming[lang]=v;changed(p);});
+      if(p.upcoming?.hr||p.upcoming?.en)button('Dodaj gotov video umjesto najave',()=>{
+        if(busy)return;
+        const video=M.emptyVideo();p.videos.push(video);p.upcoming=M.pair();changed(p);renderForm();
+        message('Dodaj gotov video i naslovnicu u novo mjesto. Promjena ostaje privatni nacrt do pregleda i objave.');
+      },form);
       const coverLabel=document.createElement('label');coverLabel.textContent='Naslovnica projekta / najave (opcionalno)';
       const coverInput=document.createElement('input');coverInput.type='file';coverInput.accept='image/jpeg,image/png,image/webp';coverInput.disabled=busy>0;
       coverInput.addEventListener('change',()=>upload(coverInput.files[0],{set poster(url){p.cover=url;}},true).catch(e=>message(e.message)));

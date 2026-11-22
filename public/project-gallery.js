@@ -48,7 +48,17 @@
         const fingerprint=JSON.stringify(list.map(v=>[v.id,v.src,v.poster,v.kind]));
         if(signature!==fingerprint){children.forEach(c=>c.box.querySelector('video')?.pause());videos.replaceChildren();children=list.map(createVideo);children.forEach(c=>videos.append(c.box));signature=fingerprint;}
         children.forEach((c,i)=>{c.update(list[i]);c.box.hidden=!M.visible(list[i],language);if(c.box.hidden)c.box.querySelector('video')?.pause();});
-        upcoming.textContent=M.local(next.upcoming,language);upcoming.hidden=!upcoming.textContent;
+        const inline=selected==='all'&&!preview&&next.status!=='comingSoon';
+        upcoming.classList.toggle('project-inline-announcement',inline);
+        upcoming.replaceChildren();
+        const upcomingText=M.local(next.upcoming,language);
+        if(inline&&upcomingText){
+          const label=document.createElement('span');label.className='project-badge';label.textContent=text('Uskoro','Coming Soon');
+          const copy=document.createElement('span');copy.textContent=upcomingText;upcoming.append(label,copy);
+        }else upcoming.textContent=upcomingText;
+        upcoming.hidden=!upcomingText;
+        const upcomingParent=inline?videos:element;
+        if(upcoming.parentElement!==upcomingParent)upcomingParent.append(upcoming);
         element.hidden=(!M.visible(next,language))||(selected!=='all'&&next.category!==selected);
         if(element.hidden)element.querySelectorAll('video').forEach(v=>v.pause());
       }};

@@ -17,17 +17,25 @@
   function emptyProject(){return {id:crypto.randomUUID(),client:'',privateClient:'',hideClient:false,title:pair(),description:pair(),category:'',status:'draft',visibility:'both',order:Date.now(),featured:false,cover:'',location:pair(),videos:[],upcoming:pair()};}
   function emptyVideo(){return {id:crypto.randomUUID(),title:pair(),src:'',kind:'file',poster:'',types:[],language:'other',visibility:'both'};}
   function upgrade(doc){
-    const result=copy(doc);if(Array.isArray(result.projects))return result;
+    const result=copy(doc);
+    if(Array.isArray(result.projects)){
+      if(!result.brandRowsOrderInitialized){
+        const legacy=result.projects.filter(p=>p.legacySlot);
+        if(legacy.every(p=>p.order===Number(p.legacySlot)-1))legacy.forEach(p=>p.order=({1:0,3:1,2:2,5:3,4:4})[p.legacySlot]);
+        result.brandRowsOrderInitialized=true;
+      }
+      return result;
+    }
     result.version=3;result.phone='+385 91 151 3866';result.categories=copy(categories);
     const names=['FLOVA','HERBOXA','PERO','T&T 3D STUDIO','LUIDO PET GEAR'],industries=['wellness','wellness','home','creative','pets'];
     result.projects=(result.videos||[]).filter(v=>v.src).map(v=>{
-      const i=Number(v.slot)-1,p=emptyProject();p.id='legacy-'+v.slot;p.legacySlot=v.slot;p.client=names[i]||v.name;p.title=pair(p.client,p.client);p.category=industries[i];p.status='published';p.order=i;
+      const i=Number(v.slot)-1,p=emptyProject();p.id='legacy-'+v.slot;p.legacySlot=v.slot;p.client=names[i]||v.name;p.title=pair(p.client,p.client);p.category=industries[i];p.status='published';p.order=({1:0,3:1,2:2,5:3,4:4})[v.slot]??i;
       p.videos=[{...emptyVideo(),id:'legacy-video-'+v.slot,title:pair(p.client,p.client),src:v.src,poster:posterFor(v.src),legacyName:v.name||'',language:'other'}];
       if(v.slot==='1')p.upcoming=pair('Drugi video je u pripremi.','A second video is coming soon.');return p;
     });
     const biljarica=emptyProject();Object.assign(biljarica,{id:'upcoming-biljarica',client:'Biljarica',title:pair('Biljarica','Biljarica'),description:pair('Prirodni kruti šampon i regenerator.','Natural solid shampoo & conditioner.'),category:'beauty',status:'comingSoon',order:100});
     const pet=emptyProject();Object.assign(pet,{id:'upcoming-pet',client:'',hideClient:true,title:pair('Nova suradnja za kućne ljubimce','New pet collaboration'),description:pair('Suradnja u pripremi. Detalji uskoro.','A collaboration in preparation. Details coming soon.'),category:'pets',status:'comingSoon',order:101});
-    result.projects.push(biljarica,pet);return result;
+    result.projects.push(biljarica,pet);result.brandRowsOrderInitialized=true;return result;
   }
   function publicDocument(doc){
     const out=copy(doc);if(!out.projects)return out;
