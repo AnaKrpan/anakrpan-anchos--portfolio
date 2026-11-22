@@ -40,6 +40,7 @@
     }
     button('＋ Novi projekt',()=>{if(!doc||busy)return;const p=M.emptyProject();p.order=doc.projects.length;doc.projects.push(p);currentId=p.id;changed(p);renderForm();});
     button('Spremi nacrt',async()=>{if(busy)return;const saved=await options.save();if(saved!==false)message('Privatni nacrt spremljen. Nove izmjene još nisu objavljene.');});
+    button('Pregled cijele galerije',()=>options.fullPreview?.());
     button('Pregled HR',()=>preview('hr'));button('Pregled EN',()=>preview('en'));button('Objavi odabrani projekt',publish);
     function renderList(){
       list.replaceChildren();if(!doc)return;

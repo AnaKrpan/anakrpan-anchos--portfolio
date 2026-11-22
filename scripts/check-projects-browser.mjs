@@ -96,8 +96,37 @@ try{
   assert.equal(await page.getByLabel('Stanje nakon objave',{exact:true}).inputValue(),'draft');
   assert.equal(await page.getByLabel('Industrija',{exact:true}).inputValue(),'jewelry');
   assert(await page.getByLabel('Influencer Marketing',{exact:true}).isChecked());
+
+  await page.getByRole('button',{name:'Pregled cijele galerije',exact:true}).click();
+  assert(await page.locator('#private-gallery-preview-notice').isVisible());
+  assert.equal(await page.locator('#project-gallery > .project-card').first().getAttribute('data-project-id'),'holiday-house-the-view');
+  assert.equal(await page.locator('#project-gallery [data-project-id="holiday-house-the-view"] .project-missing').count(),3);
+  assert.equal(await page.locator('#project-filters button:visible').nth(1).innerText(),'Smještaj i putovanja');
+  await page.getByRole('button',{name:'Smještaj i putovanja',exact:true}).click();
+  assert.equal(await page.locator('#project-gallery .project-card:visible').first().getAttribute('data-project-id'),'holiday-house-the-view');
+  await page.getByRole('button',{name:'English',exact:true}).click();
+  assert.equal(await page.locator('#project-filters button:visible').nth(1).innerText(),'Travel & Hospitality');
+  await page.getByRole('button',{name:'All Work',exact:true}).click();
+  assert.equal(await page.locator('#project-gallery > .project-card').first().getAttribute('data-project-id'),'holiday-house-the-view');
+  await page.getByRole('button',{name:'Hrvatski',exact:true}).click();
   await page.locator('[data-edit-project="holiday-house-the-view"]').click();await page.getByRole('button',{name:'Pregled HR',exact:true}).click();
   assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
+  const fixture=await page.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=180;canvas.height=320;const c=canvas.getContext('2d');c.fillStyle='#ddd0c7';c.fillRect(0,0,180,320);c.fillStyle='#382f29';c.font='20px sans-serif';c.fillText('TEST ONLY',28,160);const cover=canvas.toDataURL('image/jpeg').split(',')[1];const stream=canvas.captureStream(10),recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'}),parts=[];recorder.ondataavailable=e=>parts.push(e.data);const finished=new Promise(r=>recorder.onstop=r);recorder.start();await new Promise(r=>setTimeout(r,350));c.fillText('TEST',40,220);await new Promise(r=>setTimeout(r,350));recorder.stop();await finished;stream.getTracks().forEach(t=>t.stop());const bytes=new Uint8Array(await new Blob(parts).arrayBuffer());let value='';for(const b of bytes)value+=String.fromCharCode(b);return {video:btoa(value),cover};});
+  for(let i=0;i<3;i++){
+    await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).nth(i).setInputFiles({name:'private-holiday-test-'+i+'.webm',mimeType:'video/webm',buffer:Buffer.from(fixture.video,'base64')});
+    await page.waitForFunction(()=>!document.querySelector('#project-editor input[type=file]')?.disabled);await page.waitForTimeout(500);
+    await page.getByLabel('Dodaj / zamijeni naslovnicu',{exact:true}).nth(i).setInputFiles({name:'private-holiday-cover-'+i+'.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.cover,'base64')});
+    await page.waitForFunction(()=>!document.querySelector('#project-editor input[type=file]')?.disabled);await page.waitForTimeout(500);
+  }
+  const holidayDraft=(await(await context.request.get(origin+'/api/draft')).json()).document.projects.find(p=>p.id==='holiday-house-the-view');
+  assert.equal(holidayDraft.status,'draft');assert(holidayDraft.videos.every(v=>v.src&&v.poster));
+  assert(!(await publicData()).projects.some(p=>p.id==='holiday-house-the-view'));
+  const outsider=await browser.newContext({ignoreHTTPSErrors:true});
+  assert.equal((await outsider.request.get(origin+'/api/draft')).status(),401);
+  for(const v of holidayDraft.videos)assert.equal((await outsider.request.get(origin+v.src)).status(),401);
+  await outsider.close();
+  for(const lang of ['HR','EN']){await page.getByRole('button',{name:'Pregled '+lang,exact:true}).click();assert.equal(await page.locator('.project-preview-dialog video').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();}
+
 
   await page.locator('[data-edit-project="legacy-1"]').click();
   await page.getByRole('button',{name:'Dodaj gotov video umjesto najave',exact:true}).click();
@@ -130,7 +159,6 @@ try{
   await previews();await page.getByRole('button',{name:'Objavi odabrani projekt',exact:true}).click();await page.waitForTimeout(300);
   assert((await publicData()).projects.some(p=>p.id===id&&p.status==='comingSoon'));assert(!JSON.stringify(await publicData()).includes('SECRET-CONTRACT'));assert(!JSON.stringify(await publicData()).includes('Privatni probni brend'));
   await page.getByRole('button',{name:'＋ Dodaj video ili poveznicu',exact:true}).click();
-  const fixture=await page.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=180;canvas.height=320;const c=canvas.getContext('2d');c.fillStyle='#ddd0c7';c.fillRect(0,0,180,320);c.fillStyle='#382f29';c.font='20px sans-serif';c.fillText('TEST ONLY',28,160);const cover=canvas.toDataURL('image/jpeg').split(',')[1];const stream=canvas.captureStream(10),recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'}),parts=[];recorder.ondataavailable=e=>parts.push(e.data);const finished=new Promise(r=>recorder.onstop=r);recorder.start();await new Promise(r=>setTimeout(r,350));c.fillText('TEST',40,220);await new Promise(r=>setTimeout(r,350));recorder.stop();await finished;stream.getTracks().forEach(t=>t.stop());const bytes=new Uint8Array(await new Blob(parts).arrayBuffer());let value='';for(const b of bytes)value+=String.fromCharCode(b);return {video:btoa(value),cover};});
   await page.getByLabel('Dodaj / zamijeni originalni video',{exact:true}).setInputFiles({name:'private-test.webm',mimeType:'video/webm',buffer:Buffer.from(fixture.video,'base64')});
   await page.waitForFunction(()=>!document.querySelector('#project-editor input[type=file]')?.disabled);
   await page.waitForTimeout(500);

@@ -1,4 +1,12 @@
-let projectDocument=null,projectGallery=null,projectEditor=null,legacyEdited=false;
+let projectDocument=null,projectGallery=null,projectEditor=null,legacyEdited=false,projectSandbox=false;
+function renderProjectGallery(){
+  if(!projectDocument||!projectGallery)return;
+  const privatePreview=projectSandbox&&editing&&location.pathname==='/uredi';
+  projectGallery.render(projectDocument,PortfolioLanguage.language,{includeDrafts:privatePreview});
+  let notice=document.querySelector('#private-gallery-preview-notice');
+  if(privatePreview&&!notice){notice=document.createElement('p');notice.id='private-gallery-preview-notice';notice.className='sandbox-notice';document.querySelector('#project-filters').before(notice);}
+  if(notice){notice.hidden=!privatePreview;notice.textContent=PortfolioLanguage.language==='en'?'PRIVATE DRAFT PREVIEW — visible only while signed in. Nothing is published.':'PRIVATNI PREGLED NACRTA — vidljiv samo nakon prijave. Ništa nije objavljeno.';}
+}
 let editing = false;
 let selectedPhoto = null;
 let pendingFiles = 0;
@@ -19,6 +27,7 @@ function setEditing(value) {
     else { el.removeAttribute('contenteditable'); el.removeAttribute('spellcheck'); }
   });
   if (value) { syncFields(); panel.scrollIntoView({ behavior: 'smooth' }); }
+  renderProjectGallery();
 }
 function syncFields() {
   document.querySelector('#edit-title').value = document.title;
@@ -180,12 +189,13 @@ const uploads = PortfolioUploads.createUploader({request:requestJSON});
 const uploadFile = (file,type,report=message) => uploads.upload(file,type,report);
 projectGallery=PortfolioProjectGallery.mount(document.querySelector('#project-gallery'),document.querySelector('#project-filters'));
 projectEditor=PortfolioProjectEditor.mount(document.querySelector('#project-editor'),{
-  change:markDirty,refresh:()=>projectDocument&&projectGallery.render(projectDocument,PortfolioLanguage.language),message,
+  change:markDirty,refresh:renderProjectGallery,message,
+  fullPreview:()=>{if(projectSandbox&&editing){renderProjectGallery();document.querySelector('#private-gallery-preview-notice').scrollIntoView({behavior:'smooth',block:'start'});}},
   save:async()=>{let result=await saveChanges();if(result===false)return false;if(dirty)result=await saveChanges();return result;},
   publish:id=>requestJSON('/api/projects/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,revision})}),
   upload:async(file,type,report)=>{pendingFiles++;setSaveButton();try{return await uploadFile(file,type,report);}finally{pendingFiles--;setSaveButton();}}
 });
-document.addEventListener('portfolio-language',()=>{if(projectDocument)projectGallery.render(projectDocument,PortfolioLanguage.language);});
+document.addEventListener('portfolio-language',renderProjectGallery);
 
 async function addPhoto(file,target) {
   if (!file || !target) return;
@@ -256,7 +266,7 @@ function applyDocument(doc) {
   }
   window.PortfolioLanguage?.afterDocument();
   document.querySelector('#legacy-video-grid').hidden=true;
-  projectGallery.render(projectDocument,PortfolioLanguage.language);
+  renderProjectGallery();
   projectEditor.setDocument(projectDocument);
 }
 exportButton.addEventListener('click',async () => {
@@ -279,6 +289,7 @@ const draftReady = (async () => {
   document.querySelector('#start-edit').hidden=true;
   try {
     const [session,content]=location.pathname==='/uredi'?await Promise.all([requestJSON('/api/session'),requestJSON('/api/draft')]):await requestJSON('/api/content').then(content=>[content,content]);
+    projectSandbox=!!content.sandbox;
     if(content.document)applyDocument(content.document);
     if(content.sandbox){const note=document.querySelector('#sandbox-notice');note.hidden=false;note.textContent='PROBNO OKRUŽENJE — objavy se prikazuju samo ovdje. Javna stranica ostaje nepromijenjena.';}
     revision=content.revision;canEdit=session.canEdit;
