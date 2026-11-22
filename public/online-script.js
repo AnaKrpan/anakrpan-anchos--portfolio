@@ -1,11 +1,12 @@
-let projectDocument=null,projectGallery=null,projectEditor=null,legacyEdited=false,projectSandbox=false;
+let projectDocument=null,projectGallery=null,projectEditor=null,legacyEdited=false,projectSandbox=false,privateGalleryLanguage='hr';
 function renderProjectGallery(){
   if(!projectDocument||!projectGallery)return;
   const privatePreview=projectSandbox&&editing&&location.pathname==='/uredi';
-  projectGallery.render(projectDocument,PortfolioLanguage.language,{includeDrafts:privatePreview});
+  const previewLanguage=privatePreview?privateGalleryLanguage:PortfolioLanguage.language;
+  projectGallery.render(projectDocument,previewLanguage,{includeDrafts:privatePreview});
   let notice=document.querySelector('#private-gallery-preview-notice');
   if(privatePreview&&!notice){notice=document.createElement('p');notice.id='private-gallery-preview-notice';notice.className='sandbox-notice';document.querySelector('#project-filters').before(notice);}
-  if(notice){notice.hidden=!privatePreview;notice.textContent=PortfolioLanguage.language==='en'?'PRIVATE DRAFT PREVIEW — visible only while signed in. Nothing is published.':'PRIVATNI PREGLED NACRTA — vidljiv samo nakon prijave. Ništa nije objavljeno.';}
+  if(notice){notice.hidden=!privatePreview;notice.textContent=previewLanguage==='en'?'PRIVATE DRAFT PREVIEW — visible only while signed in. Nothing is published.':'PRIVATNI PREGLED NACRTA — vidljiv samo nakon prijave. Ništa nije objavljeno.';}
 }
 let editing = false;
 let selectedPhoto = null;
@@ -190,7 +191,7 @@ const uploadFile = (file,type,report=message) => uploads.upload(file,type,report
 projectGallery=PortfolioProjectGallery.mount(document.querySelector('#project-gallery'),document.querySelector('#project-filters'));
 projectEditor=PortfolioProjectEditor.mount(document.querySelector('#project-editor'),{
   change:markDirty,refresh:renderProjectGallery,message,
-  fullPreview:()=>{if(projectSandbox&&editing){renderProjectGallery();document.querySelector('#private-gallery-preview-notice').scrollIntoView({behavior:'smooth',block:'start'});}},
+  fullPreview:lang=>{if(projectSandbox&&editing){if(['hr','en'].includes(lang))privateGalleryLanguage=lang;renderProjectGallery();document.querySelector('#private-gallery-preview-notice').scrollIntoView({behavior:'smooth',block:'start'});}},
   save:async()=>{let result=await saveChanges();if(result===false)return false;if(dirty)result=await saveChanges();return result;},
   publish:id=>requestJSON('/api/projects/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,revision})}),
   upload:async(file,type,report)=>{pendingFiles++;setSaveButton();try{return await uploadFile(file,type,report);}finally{pendingFiles--;setSaveButton();}}

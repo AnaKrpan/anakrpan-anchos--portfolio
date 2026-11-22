@@ -104,11 +104,11 @@ try{
   assert.equal(await page.locator('#project-filters button:visible').nth(1).innerText(),'Smještaj i putovanja');
   await page.getByRole('button',{name:'Smještaj i putovanja',exact:true}).click();
   assert.equal(await page.locator('#project-gallery .project-card:visible').first().getAttribute('data-project-id'),'holiday-house-the-view');
-  await page.getByRole('button',{name:'English',exact:true}).click();
+  await page.getByRole('button',{name:'Galerija EN',exact:true}).click();
   assert.equal(await page.locator('#project-filters button:visible').nth(1).innerText(),'Travel & Hospitality');
   await page.getByRole('button',{name:'All Work',exact:true}).click();
   assert.equal(await page.locator('#project-gallery > .project-card').first().getAttribute('data-project-id'),'holiday-house-the-view');
-  await page.getByRole('button',{name:'Hrvatski',exact:true}).click();
+  await page.getByRole('button',{name:'Galerija HR',exact:true}).click();
   await page.locator('[data-edit-project="holiday-house-the-view"]').click();await page.getByRole('button',{name:'Pregled HR',exact:true}).click();
   assert.equal(await page.locator('.project-preview-dialog .project-missing').count(),3);await page.getByRole('button',{name:'Zatvori pregled',exact:true}).click();
   const fixture=await page.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=180;canvas.height=320;const c=canvas.getContext('2d');c.fillStyle='#ddd0c7';c.fillRect(0,0,180,320);c.fillStyle='#382f29';c.font='20px sans-serif';c.fillText('TEST ONLY',28,160);const cover=canvas.toDataURL('image/jpeg').split(',')[1];const stream=canvas.captureStream(10),recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'}),parts=[];recorder.ondataavailable=e=>parts.push(e.data);const finished=new Promise(r=>recorder.onstop=r);recorder.start();await new Promise(r=>setTimeout(r,350));c.fillText('TEST',40,220);await new Promise(r=>setTimeout(r,350));recorder.stop();await finished;stream.getTracks().forEach(t=>t.stop());const bytes=new Uint8Array(await new Blob(parts).arrayBuffer());let value='';for(const b of bytes)value+=String.fromCharCode(b);return {video:btoa(value),cover};});
