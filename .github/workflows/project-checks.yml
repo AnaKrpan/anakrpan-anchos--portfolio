@@ -1,0 +1,52 @@
+name: Check private project editor and portfolio preview
+on:
+  push:
+    branches: [portfolio-projects-preview]
+permissions:
+  contents: read
+jobs:
+  projects:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm test && npm run build
+      - run: |
+          npm install --no-save --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Test mobile and desktop project management with isolated data
+        run: node scripts/check-projects-browser.mjs
+      - name: Check full public HR and EN translations without changing content
+        run: node scripts/check-language-browser.mjs
+      - name: Check actual review deployment without writing production data
+        shell: python
+        run: |
+          import urllib.request,urllib.error,json,time
+          origin='https://deploy-preview-3--anakrpan-anchos-potrfolio.netlify.app'
+          data=None;protected=False
+          for attempt in range(12):
+            try:
+              with urllib.request.urlopen(origin+'/api/content',timeout=20) as r: candidate=json.load(r)
+              if candidate.get('sandbox') and 'projects' in candidate.get('document',{}): data=candidate;break
+            except urllib.error.HTTPError as error:
+              body=error.read(2000).decode('utf-8',errors='replace')
+              if error.code==401 and 'app.netlify.com' in body and 'edge-access' in body:
+                protected=True;break
+            except Exception: pass
+            time.sleep(5)
+          if protected:
+            print(json.dumps({'reviewAccessProtectedByNetlify':True,'ownerLoginRequiredForLiveTrial':True,'authenticatedLiveTrialPending':True}))
+          else:
+            assert data, 'Review deployment is not ready'
+            doc=data['document']
+            assert doc['phone']=='+385 91 151 3866'
+            assert len([p for p in doc['projects'] if p.get('legacySlot')])==5
+            assert not any(p['status']=='draft' for p in doc['projects'])
+            assert not any(p['id']=='holiday-house-the-view' for p in doc['projects'])
+            try: urllib.request.urlopen(origin+'/api/draft',timeout=20);raise AssertionError('Draft exposed')
+            except urllib.error.HTTPError as error: assert error.code==401
+            print(json.dumps({'reviewDeploymentReady':True,'fiveLegacyProjects':True,'privateDraftProtected':True}))

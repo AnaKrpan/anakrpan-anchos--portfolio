@@ -66,13 +66,13 @@ try{
     const galleryEnglish=await page.locator('.gallery-item .card-label span').first().innerText();
     await page.locator('.gallery-item').first().click();assert.equal(await page.locator('#image-dialog').isVisible(),true);assert.equal(await page.locator('#dialog-title').innerText(),galleryEnglish);
     await page.evaluate(()=>PortfolioLanguage.setLanguage('hr'));assert.equal(await page.locator('#dialog-title').innerHTML(),hr.texts[33]);await page.locator('#close-dialog').click();
-    await page.locator('[data-video-slot="1"] .video-start').click();await page.waitForTimeout(100);
-    await page.evaluate(()=>{document.querySelector('video').currentTime=17;});const selected=await snapshot(page);
+    await page.locator('#project-gallery [data-project-id="legacy-1"] .video-start').click();await page.waitForTimeout(100);
+    await page.evaluate(()=>{document.querySelector('#project-gallery [data-project-id="legacy-1"] video').currentTime=17;});const selected=await snapshot(page);
     await page.evaluate(()=>PortfolioLanguage.setLanguage('en'));assert.deepEqual((await snapshot(page)).media,selected.media,'Changing language must not restart or reload a video');
     await page.goto(origin+'/uredi?lang=en');await page.waitForFunction(()=>document.body.classList.contains('editing'));
     assert.equal(await page.locator('html').getAttribute('lang'),'hr');assert.equal(await page.locator('.language-switch').isVisible(),false);
     await page.locator('.intro-copy h2').fill('Provjera privatnog nacrta');
-    await page.waitForTimeout(1600);assert(writes.length>0);const saved=writes.at(-1).document;
+    await page.waitForTimeout(3000);assert(writes.length>0);const saved=writes.at(-1).document;
     assert(saved.texts.includes('Provjera privatnog nacrta'));assert(saved.texts.includes('KREATORICA SADRŽAJA<br>UGC KREATOR<br>INFLUENCER'));
     assert.deepEqual(saved.videos.map(v=>v.src),data.document.videos.map(v=>v.src));assert.equal(saved.collaborations.items[0].comment,hr.collaborations.items[0].comment);
     assert.deepEqual(errors,[]);console.log(JSON.stringify({viewport,croatianRestoredExactly:true,allCurrentTextTranslated:true,mediaUnchanged:true,noLanguageNetworkRequests:true,privateCroatianEditingPreserved:true}));await page.close();

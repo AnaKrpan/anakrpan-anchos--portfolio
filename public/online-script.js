@@ -1,3 +1,15 @@
+const clientDraftPreview=location.pathname==='/'&&new URLSearchParams(location.search).get('pregled')==='nacrt'&&location.hostname!=='anakrpan-anchos-potrfolio.netlify.app';
+let projectDocument=null,projectGallery=null,projectEditor=null,legacyEdited=false,projectSandbox=false,privateGalleryLanguage='hr';
+function renderProjectGallery(){
+  if(!projectDocument||!projectGallery)return;
+  const privatePreview=projectSandbox&&(clientDraftPreview||(editing&&location.pathname==='/uredi'));
+  const previewLanguage=privatePreview&&!clientDraftPreview?privateGalleryLanguage:PortfolioLanguage.language;
+  projectGallery.render(projectDocument,previewLanguage,{includeDrafts:privatePreview,clientPreview:clientDraftPreview});
+  const playbackNote=document.querySelector('#gallery-playback-note');if(playbackNote)playbackNote.textContent=previewLanguage==='en'?"Videos are optimized for smooth playback. Original 4K versions are available upon request.":"Videi su optimizirani za brzu reprodukciju. Originalne 4K verzije dostupne su na zahtjev.";
+  let notice=document.querySelector('#private-gallery-preview-notice');
+  if(privatePreview&&!notice){notice=document.createElement('p');notice.id='private-gallery-preview-notice';notice.className='sandbox-notice';document.querySelector('#project-filters').before(notice);}
+  if(notice){notice.hidden=!privatePreview;notice.textContent=previewLanguage==='en'?'PRIVATE DRAFT PREVIEW — visible only while signed in. Nothing is published.':'PRIVATNI PREGLED NACRTA — vidljiv samo nakon prijave. Ništa nije objavljeno.';}
+}
 let editing = false;
 let selectedPhoto = null;
 let pendingFiles = 0;
@@ -18,6 +30,7 @@ function setEditing(value) {
     else { el.removeAttribute('contenteditable'); el.removeAttribute('spellcheck'); }
   });
   if (value) { syncFields(); panel.scrollIntoView({ behavior: 'smooth' }); }
+  renderProjectGallery();
 }
 function syncFields() {
   document.querySelector('#edit-title').value = document.title;
@@ -99,9 +112,11 @@ dialog.addEventListener('click', event => {
 dialog.addEventListener('close', () => document.body.classList.remove('dialog-open'));
 function captureDraft() {
   if(window.PortfolioLanguage?.language==='en')return PortfolioLanguage.withCroatian(captureDraft);
+  if(projectDocument&&!legacyEdited)return {...PortfolioProjectModel.copy(projectDocument),updatedAt:Date.now()};
   return {
+    ...projectDocument,
     collaborations: PortfolioCollaborations.capture(),
-    version: 2, updatedAt: Date.now(), title: document.title,
+    version: projectDocument?.projects?3:2, updatedAt: Date.now(), title: document.title,
     description: document.querySelector('meta[name="description"]').content,
     texts: Array.from(document.querySelectorAll('[data-edit]'), el => el.innerHTML),
     photos: Array.from(document.querySelectorAll('[data-photo]'), el => ({ src: el.getAttribute('src'), alt: el.alt })),
@@ -128,15 +143,22 @@ const globalNotice = document.querySelector('#online-notice');
 function markDirty() {
   dirty = true; serial++;
   document.querySelector('#draft-status').textContent = 'Spremam privatni nacrt…';
-  clearTimeout(saveTimer); saveTimer = setTimeout(() => saveChanges(), 1200);
+  clearTimeout(saveTimer); saveTimer = setTimeout(() => saveChanges(), 2500);
 }
 async function requestJSON(path, options = {}) {
-  let response;
-  try { response = await fetch(path, { credentials:'same-origin', ...options }); }
-  catch (error) { throw new Error(error.name === 'AbortError' ? 'Veza je prespora ili je prekinuta.' : 'Veza sa stranicom je prekinuta.'); }
-  let data; try { data = await response.json(); } catch (_) { throw new Error('Veza sa stranicom nije dostupna. Izmjene su zadržane u ovoj kartici.'); }
-  if (!response.ok) { const error = new Error(data.error || 'Spremanje nije uspjelo.'); error.status = response.status; error.trace = data.trace; throw error; }
-  return data;
+  const controller=new AbortController(),upstream=options.signal;
+  const forward=()=>controller.abort();upstream?.addEventListener('abort',forward,{once:true});if(upstream?.aborted)forward();
+  let timer;
+  const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('Veza nije odgovorila u 35 sekundi. Spremanje nije potvrđeno; podaci ostaju u otvorenoj kartici. Pokušaj ponovno.'));},35000);});
+  const operation=(async()=>{
+    let response;
+    try{response=await fetch(path,{credentials:'same-origin',...options,signal:controller.signal});}
+    catch(error){throw new Error(error.name==='AbortError'?'Veza je prespora ili je prekinuta.':'Veza sa stranicom je prekinuta.');}
+    let data;try{data=await response.json();}catch(_){throw new Error('Veza sa stranicom nije dostupna. Izmjene su zadržane u ovoj kartici.');}
+    if(!response.ok){const error=new Error(data.error||'Spremanje nije uspjelo.');error.status=response.status;error.trace=data.trace;throw error;}return data;
+  })();
+  try{return await Promise.race([operation,deadline]);}
+  finally{clearTimeout(timer);upstream?.removeEventListener('abort',forward);}
 }
 function setSaveButton() { exportButton.disabled = !!saving || publishing || pendingFiles > 0 || !canEdit; exportButton.textContent = publishing ? 'Objavljujem…' : saving ? 'Spremam nacrt…' : 'Spremi i objavi'; }
 async function saveChanges() {
@@ -175,6 +197,40 @@ async function saveChanges() {
 }
 const uploads = PortfolioUploads.createUploader({request:requestJSON});
 const uploadFile = (file,type,report=message) => uploads.upload(file,type,report);
+
+let preparing1080Slots=false;
+async function prepare1080Slots(){
+  if(!projectSandbox||!canEdit||location.pathname!=='/uredi'||preparing1080Slots||projectDocument?.originalVideoReplacements?.applied)return;
+  preparing1080Slots=true;
+  const before=projectDocument,beforeSerial=serial;
+  try{
+    const proposal=PortfolioProjectModel.prepare1080ReplacementSlots(before);
+    const checks=await Promise.allSettled(proposal.targets.filter(t=>t.before.src).map(async target=>{
+      const src=target.before.src;
+      if(!/^\/media\/[a-f0-9-]{36}\.(mp4|mov|m4v|webm|ogv)$/.test(src))throw new Error('Postojeća datoteka nije u potvrđenoj pohrani.');
+      const response=await fetch(src,{method:'HEAD',credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(35000)});
+      if(!response.ok||Number(response.headers.get('content-length'))<=0)throw new Error('Dostupnost izvorne datoteke nije potvrđena.');
+    }));
+    if(checks.some(result=>result.status==='rejected'))throw new Error('Provjera datoteka nije uspjela. Ništa nije odspojeno; pokušaj ponovno.');
+    if(before!==projectDocument||beforeSerial!==serial||pendingFiles||projectEditor.busy())throw new Error('Uređivanje ili prijenos je u tijeku. Ništa nije odspojeno. Ponovi pripremu kada završi.');
+    projectDocument=proposal.document;projectEditor.setDocument(projectDocument);renderProjectGallery();markDirty();
+    const saved=await saveChanges();
+    message(saved===true?'Tri mjesta su pripremljena za 1080p videe. Prvi i treći Holiday video te svi ostali podaci ostaju sačuvani. Izvornici nisu izbrisani.':'Mjesta su pripremljena u ovoj kartici, ali spremanje nije potvrđeno. Pritisni Spremi nacrt prije zatvaranja. Stare poveznice su sačuvane u nacrtu.');
+  }catch(error){message(error.message);}
+  finally{preparing1080Slots=false;}
+}
+
+projectGallery=PortfolioProjectGallery.mount(document.querySelector('#project-gallery'),document.querySelector('#project-filters'));
+projectEditor=PortfolioProjectEditor.mount(document.querySelector('#project-editor'),{
+  change:markDirty,refresh:renderProjectGallery,message,
+  prepareReplacements:prepare1080Slots,
+  fullPreview:lang=>{if(projectSandbox&&editing){const x=scrollX,y=scrollY;const switching=['hr','en'].includes(lang);if(switching)privateGalleryLanguage=lang;renderProjectGallery();if(switching)scrollTo({left:x,top:y,behavior:'instant'});else document.querySelector('#private-gallery-preview-notice').scrollIntoView({behavior:'smooth',block:'start'});}},
+  save:async()=>{if(!canEdit){message('Prijava za uređivanje više nije potvrđena. Podaci ostaju u otvorenoj kartici.');return false;}for(let attempt=0;attempt<4;attempt++){if(saving){if(await saving===false)return false;await new Promise(resolve=>setTimeout(resolve,0));}else if(await saveChanges()===false)return false;if(!saving&&!dirty)return true;await new Promise(resolve=>setTimeout(resolve,50));}message('Još postoje nove izmjene. Ponovno pritisni Spremi nacrt; podaci su zadržani.');return false;},
+  publish:id=>requestJSON('/api/projects/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,revision})}),
+  upload:async(file,type,report)=>{pendingFiles++;setSaveButton();try{return await uploadFile(file,type,report);}finally{pendingFiles--;setSaveButton();}}
+});
+document.addEventListener('portfolio-language',renderProjectGallery);
+
 async function addPhoto(file,target) {
   if (!file || !target) return;
   const epoch = (photoEpochs.get(target)||0)+1; photoEpochs.set(target,epoch);
@@ -183,7 +239,7 @@ async function addPhoto(file,target) {
     const photo = await PortfolioPhotos.preparePhoto(file);
     const result = await uploadFile(photo,photo.type);
     if (photoEpochs.get(target)!==epoch) return;
-    target.src = result.url; markDirty(); await saveChanges();
+    target.src = result.url; legacyEdited=true;markDirty(); await saveChanges();
   } catch (error) { message(error.message+' Prethodna fotografija je zadržana.'); }
   finally { pendingFiles--; setSaveButton(); if (dirty && !pendingFiles) saveChanges(); }
 }
@@ -219,6 +275,7 @@ document.querySelectorAll('[data-video-slot]').forEach(card => {
   video.addEventListener('error',() => {if(editing&&!failedVideoSlots.size)message('Pregled videa se nije pokrenuo. Spremljena datoteka i tekst ostaju sačuvani.');});
 });
 function applyDocument(doc) {
+  doc=PortfolioProjectModel.upgrade(doc);projectDocument=doc;legacyEdited=false;
   window.PortfolioLanguage?.beforeDocument();
   PortfolioCollaborations.restore(doc.collaborations);
   document.title=doc.title; document.querySelector('meta[name="description"]').content=doc.description;
@@ -242,9 +299,13 @@ function applyDocument(doc) {
     card.dataset.mediaName=state.name||'';
   }
   window.PortfolioLanguage?.afterDocument();
+  document.querySelector('#legacy-video-grid').hidden=true;
+  renderProjectGallery();
+  projectEditor.setDocument(projectDocument);
 }
 exportButton.addEventListener('click',async () => {
-  if(pendingFiles || publishing)return;
+  if(pendingFiles || publishing || projectEditor.busy())return;
+  try{await projectEditor.validatePublish();}catch(error){message(error.message);return;}
   if(revision===0 && !dirty)markDirty();
   const saved=await saveChanges();
   if(saved===false || dirty || saving)return;
@@ -256,19 +317,21 @@ exportButton.addEventListener('click',async () => {
   }catch(error){message(error.message+' Tvoj nacrt je zadržan.');}
   finally{publishing=false;setSaveButton();}
 });
-document.addEventListener('input',event => {if(editing&&(event.target.closest('[data-edit]')||event.target.closest('.editor-fields')))markDirty();});
+document.addEventListener('input',event => {if(editing&&(event.target.closest('[data-edit]')||event.target.closest('.editor-fields'))){legacyEdited=true;markDirty();}});
 window.addEventListener('beforeunload',event => {if(dirty||pendingFiles||saving||uploads.hasInterrupted()){event.preventDefault();event.returnValue='';}});
 const draftReady = (async () => {
   document.querySelector('#start-edit').hidden=true;
   try {
-    const [session,content]=location.pathname==='/uredi'?await Promise.all([requestJSON('/api/session'),requestJSON('/api/draft')]):await requestJSON('/api/content').then(content=>[content,content]);
+    const [session,content]=(location.pathname==='/uredi'||clientDraftPreview)?await Promise.all([requestJSON('/api/session'),requestJSON('/api/draft')]):await requestJSON('/api/content').then(content=>[content,content]);
+    projectSandbox=!!content.sandbox;
     if(content.document)applyDocument(content.document);
-    revision=content.revision;canEdit=session.canEdit;
+    if(content.sandbox){const note=document.querySelector('#sandbox-notice');note.hidden=false;note.textContent='PROBNO OKRUŽENJE — objavy se prikazuju samo ovdje. Javna stranica ostaje nepromijenjena.';}
+    revision=content.revision;canEdit=!clientDraftPreview&&session.canEdit;
     canPrepareOriginals=!!session.canPrepareOriginals;
     document.querySelector('#start-edit').hidden=!canEdit;
-    document.querySelector('#owner-signin').hidden=canEdit;
+    document.querySelector('#owner-signin').hidden=canEdit||clientDraftPreview;
     globalNotice.hidden=true; setSaveButton();
-    if(canEdit && location.pathname==='/uredi')setEditing(true);
+    if(canEdit && location.pathname==='/uredi'){setEditing(true);await prepare1080Slots();}
     if(canEdit && location.pathname==='/uredi' && session.migrationNeeded) {
       // Production-only migration preserves both published and draft documents.
       requestJSON('/api/originals/migrate',{method:'POST'}).then(()=>{
@@ -290,10 +353,11 @@ const draftReady = (async () => {
       }).catch(()=>message('Prijenos postojećih originala još nije pokrenut. Prethodni videi i sve izmjene su zadržani.'));
     }
   } catch(error) {
+    if(clientDraftPreview&&error.status===401){location.replace('/prijava.html?pregled=nacrt');return;}
     globalNotice.hidden=false;globalNotice.textContent='Spremljeni portfolio nije moguće učitati: '+error.message+' Osvježi stranicu i pokušaj ponovno.';
   }
 })();
 
-PortfolioCollaborations.init({onChange: () => markDirty(), message});
+PortfolioCollaborations.init({onChange: () => {legacyEdited=true;markDirty();}, message});
 
 document.querySelector('#sign-out').addEventListener('click',async()=>{if(dirty||pendingFiles){message('Prvo spremi izmjene i pričekaj da učitavanje završi.');return;}try{await requestJSON('/api/logout',{method:'POST'});location.href='/';}catch(error){message(error.message);}});

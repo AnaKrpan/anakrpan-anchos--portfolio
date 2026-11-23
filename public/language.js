@@ -8,7 +8,7 @@
   const translate=value=>translations.get(normalise(value));
   let language=!editingPage&&new URL(location.href).searchParams.get('lang')==='en'?'en':'hr';
   let entries=[],originalTitle=document.title,originalDescription='';
-  const ignored=el=>el?.closest('script,style,#editor-panel,.video-edit-tools,.collaboration-controls,.language-switch');
+  const ignored=el=>el?.closest('script,style,#editor-panel,.video-edit-tools,.collaboration-controls,.language-switch,[data-project-ui]');
   function capture(){
     entries=[];originalTitle=document.title;originalDescription=document.querySelector('meta[name="description"]').content;
     document.querySelectorAll('[data-edit]').forEach(el=>{entries.push({node:el,type:'html',original:el.innerHTML,english:translate(el.innerHTML)});});
@@ -55,9 +55,12 @@
   }
   function setLanguage(next){
     if(editingPage||!['hr','en'].includes(next))return;
+    const position={left:scrollX,top:scrollY,behavior:'instant'};
     language=next;render();const url=new URL(location.href);
     if(next==='en')url.searchParams.set('lang','en');else url.searchParams.delete('lang');
     history.replaceState(history.state,'',url.pathname+url.search+url.hash);
+    document.dispatchEvent(new CustomEvent('portfolio-language',{detail:{language}}));
+    scrollTo(position);
   }
   group.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>setLanguage(button.dataset.language)));
   root.PortfolioLanguage={
