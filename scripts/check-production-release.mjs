@@ -10,7 +10,8 @@ assert(ready,'Production release has not passed data validation');
 const response=await fetch(origin+'/api/content');assert(response.ok);const {document:doc}=await response.json();
 assert(doc.projects?.some(p=>p.id==='holiday-house-the-view'&&p.status==='published'));
 assert(doc.projects.every(p=>['published','comingSoon'].includes(p.status)));
-assert(doc.projects.some(p=>/barkode/i.test([p.client,p.title?.hr,p.title?.en].join(' '))&&p.status==='published'));
+// The owner completed the existing pet collaboration card and kept its client name private.
+assert(doc.projects.some(p=>(/barkode/i.test([p.client,p.title?.hr,p.title?.en].join(' '))||(p.id==='upcoming-pet'&&/affiliate/i.test(p.title?.en||'')))&&p.status==='published'&&p.videos.some(v=>v.src)),'Approved Barkode collaboration must be public, including when its client name is hidden');
 assert(doc.projects.some(p=>(p.category==='jewelry'||/naušnic|earrings/i.test(JSON.stringify(p.title)))&&p.status==='published'));
 const videos=doc.projects.filter(p=>p.status==='published').flatMap(p=>p.videos);
 assert(videos.length>=5);assert(videos.every(v=>v.src));
