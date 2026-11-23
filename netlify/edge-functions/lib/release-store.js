@@ -1,4 +1,5 @@
 import '../../../public/project-model.js';
+import {releaseHolidayInfluencer} from './holiday-influencer-release.js';
 const M=globalThis.PortfolioProjectModel;
 export const RELEASE_ID='portfolio-projects-2026-11-23';
 const options={type:'json',consistency:'strong'};
@@ -46,13 +47,14 @@ export async function releaseStore(primary,review,{approveAddedProjects=false}={
     current=await primary.getWithMetadata('state',options);
     if(!result.modified&&current?.data.projectRelease?.id!==RELEASE_ID)throw Error('Production changed; release was not applied');
   }
+  current=await releaseHolidayInfluencer(primary,review,current);
   const allowed=new Set([...references(current.data.published?.document),...references(current.data.draft?.document)].map(src=>src.slice(7)));
   const ids=new Set([...allowed].map(file=>file.split('.')[0]));
   const mayRead=key=>key.startsWith('media/')&&allowed.has(key.slice(6))||key.startsWith('parts/')&&ids.has(key.split('/')[1])||key.startsWith('viewing-copies/')&&allowed.has(key.slice(15));
   let cached=true;
   const take=()=>{cached=false;return structuredClone(current);};
   return {
-    release:{id:RELEASE_ID,ready:true},
+    release:{id:RELEASE_ID,ready:true,holidayInfluencer:current.data.holidayInfluencerRelease?.status},
     async get(key,opts){if(key==='state'&&cached)return take().data;return await primary.get(key,opts)??(mayRead(key)?review.get(key,opts):null);},
     async getWithMetadata(key,opts){if(key==='state'&&cached)return take();return await primary.getWithMetadata(key,opts)??(mayRead(key)?review.getWithMetadata(key,opts):null);},
     async getMetadata(key){return await primary.getMetadata(key)??(mayRead(key)?review.getMetadata(key):null);},
@@ -61,3 +63,4 @@ export async function releaseStore(primary,review,{approveAddedProjects=false}={
     delete(key){if(key==='state')cached=false;return primary.delete(key);}
   };
 }
+
