@@ -55,6 +55,7 @@ test('explicit final approval publishes only the three named ready drafts and re
   barkode.videos[0].src='/media/99999999-9999-4999-8999-999999999999.mp4';
   barkode.videos[0].poster=jewelry.videos[0].poster='/viewing-videos/33f0e71d-f955-4d52-b154-dd6ed2a07090-first-frame.jpg';
   const other=M.emptyProject();other.id='still-private';other.category='pets';other.title=M.pair('Privatni nacrt','Private draft');other.videos=[structuredClone(barkode.videos[0])];doc.projects.push(other);
+  snapshot.published.document=structuredClone(baseline); // The approved page may still be a private draft over the original public site.
   await review.setJSON('state',snapshot);await review.setJSON('media/99999999-9999-4999-8999-999999999999.mp4',{size:10,type:'video/mp4'});
   const released=await releaseStore(primary,review,{approveAddedProjects:true}),state=await released.get('state');
   for(const id of ['holiday-house-the-view','barkode','jewelry-accessories'])assert(state.published.document.projects.some(p=>p.id===id&&p.status==='published'));

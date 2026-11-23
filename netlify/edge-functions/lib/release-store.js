@@ -29,7 +29,7 @@ export async function releaseStore(primary,review,{approveAddedProjects=false}={
   let current=await primary.getWithMetadata('state',options);
   if(current?.data.projectRelease?.id!==RELEASE_ID){
     const snapshot=await review.getWithMetadata('state',options);
-    if(!snapshot?.data.published?.document?.projects)throw Error('Review has no published project snapshot');
+    if(!snapshot?.data.published?.document||(!approveAddedProjects&&!snapshot.data.published.document.projects))throw Error('Review has no published project snapshot');
     const selected=approvedDocument(snapshot.data,approveAddedProjects),doc=publicReady(selected.document),draft=selected.draft;
     if(draft)M.validate(draft.document);
     const publicRefs=references(doc),oldRefs=M.refs(current?.data.published?.document);
