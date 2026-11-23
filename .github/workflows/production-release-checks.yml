@@ -13,6 +13,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Inspect public release metadata
+        run: |
+          node --input-type=module -e "const o='https://anakrpan-anchos-potrfolio.netlify.app'; for(const p of ['/api/release-status','/api/content']){const r=await fetch(o+p+'?releasecheck='+Date.now()); const d=await r.json(); console.log(p,JSON.stringify(p==='/api/content'?d.document?.projects?.map(x=>({id:x.id,client:x.client,title:x.title,status:x.status,videos:x.videos?.length})):d));}"
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: npm test && npm run build
       - run: |
