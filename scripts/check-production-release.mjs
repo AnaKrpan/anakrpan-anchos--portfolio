@@ -17,9 +17,11 @@ const videos=doc.projects.filter(p=>p.status==='published').flatMap(p=>p.videos)
 assert(videos.length>=5);assert(videos.every(v=>v.src));
 for(const v of videos.filter(v=>v.src.startsWith('/media/'))){
   const head=await fetch(origin+v.src,{method:'HEAD',signal:AbortSignal.timeout(20000)});
-  assert(head.ok&&Number(head.headers.get('content-length'))>0,'Public video HEAD must succeed');
+  console.log(JSON.stringify({media:v.src,headStatus:head.status,contentLength:head.headers.get('content-length')}));
+  assert(head.ok,'Public video HEAD must succeed: '+v.src+' status '+head.status);
   const range=await fetch(origin+v.src,{headers:{range:'bytes=0-63'},signal:AbortSignal.timeout(20000)});
   if(range.status!==206){await range.body?.cancel();throw Error('Public video must support byte ranges');}
+  assert.match(range.headers.get('content-range')||'',/^bytes 0-63\/[1-9]\d*$/);
   assert.equal((await range.arrayBuffer()).byteLength,64);
 }
 assert.equal((await fetch(origin+'/api/draft')).status,401);
