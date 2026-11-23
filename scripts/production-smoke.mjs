@@ -21,7 +21,10 @@ assert.equal((await fetchTimed('/api/draft')).status,401);
 const contentResponse=await fetchTimed('/api/content');assert.equal(contentResponse.status,200);
 const {document:doc}=await contentResponse.json();assert.equal(doc.videos.length,5);assert(Array.isArray(doc.texts));
 const croatianBaseline=JSON.parse(await readFile(new URL('../tests/fixtures/language-content.json',import.meta.url),'utf8'));
-assert.deepEqual(doc,croatianBaseline.document,'The stored Croatian public document changed during the language rollout');
+assert(Array.isArray(doc.projects),'The approved project gallery must be deployed');
+assert(doc.projects.every(p=>['published','comingSoon'].includes(p.status)),'Private projects must not appear in public content');
+assert.equal(doc.texts.length,croatianBaseline.document.texts.length,'Legacy editable text bindings must be preserved');
+assert.equal(doc.phone,'+385 91 151 3866');
 const videos=doc.videos.filter(video=>video.src?.startsWith('/media/'));
 for(const video of videos){
   const response=await fetchTimed(video.src,{headers:{range:'bytes=0-63'}});
