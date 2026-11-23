@@ -47,6 +47,7 @@
     out.projects=out.projects.filter(p=>['published','comingSoon'].includes(p.status)).map(p=>{
       delete p.privateClient;delete p.reviewed;delete p.needsReview;if(p.hideClient)p.client='';
       if(p.status==='comingSoon')p.videos=[];
+      else if(p.status==='published')p.videos=p.videos.filter(v=>v.src);
       return p;
     });
     const allowed=new Set(out.projects.flatMap(p=>p.videos||[]).map(v=>v.src));

@@ -266,7 +266,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         }
         const category=draft.categories.find(c=>c.id===project.category);
         if(category){doc.categories=doc.categories.filter(c=>c.id!==category.id);doc.categories.push(ProjectModel.copy(category));}
-        ProjectModel.validate(doc,true);await checkReview(project);
+        ProjectModel.validate(ProjectModel.publicDocument(doc),true);await checkReview(project);
         const safe=ProjectModel.publicDocument(doc);await checkFiles(safe);
         const updatedAt=new Date(now()).toISOString();
         await mutateState(previous,{...state,published:{document:safe,revision:(state.published?.revision||0)+1,updatedAt}});
@@ -277,7 +277,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
         const data = await readJSON(request, 4096), previous = await entry('state'), state = previous?.data;
         if (!state?.draft || !Number.isSafeInteger(data.revision) || state.draft.revision !== data.revision) fail(409, 'Nacrt je promijenjen. Spremi ga pa ponovno objavi.');
         const doc = state.draft.document;
-        ProjectModel.validate(doc,true);
+        ProjectModel.validate(ProjectModel.publicDocument(doc),true);
         for(const project of doc.projects||[])await checkReview(project);
         const published=ProjectModel.publicDocument(doc);await checkFiles(published);
         const updatedAt = new Date(now()).toISOString();
