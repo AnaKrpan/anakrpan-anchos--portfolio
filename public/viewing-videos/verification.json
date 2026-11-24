@@ -48,5 +48,60 @@
     "width": 1080,
     "height": 1920,
     "fps": 30
+  },
+  "/media/564620a7-4e76-4b50-9828-320ff202ada7.mp4": {
+    "url": "/viewing-videos/564620a7-4e76-4b50-9828-320ff202ada7-watch-v1.mp4",
+    "originalSize": 141046233,
+    "originalSHA256": "b9f6e6f1719e4e63f76facd8650723622cae11952a6bf56a21dbc25ec0afb48b",
+    "size": 60907772,
+    "sha256": "b54edaa0014d06c06c1351d76db599cf5b0202c8a80f81d6fc6bc6bc4ccdcb4c",
+    "width": 1080,
+    "height": 1920,
+    "fps": "30/1",
+    "mode": "1080p-playback"
+  },
+  "/media/75fd2a5d-21c2-4e9f-a86b-338f6fe4e599.mp4": {
+    "url": "/viewing-videos/75fd2a5d-21c2-4e9f-a86b-338f6fe4e599-watch-v1.mp4",
+    "originalSize": 84140675,
+    "originalSHA256": "cd1e559d3e4d8bffcd6a2606f2b983cbbbe9b7638bc0b3767e98b14842ea0062",
+    "size": 29605130,
+    "sha256": "68c04f911a307ec12551374b0abbfe6cc79fc11db7d75c12cec897155811390b",
+    "width": 1080,
+    "height": 1920,
+    "fps": "30/1",
+    "mode": "1080p-playback"
+  },
+  "/media/a4e843c1-f840-4e44-82e4-c37237886892.mp4": {
+    "url": "/viewing-videos/a4e843c1-f840-4e44-82e4-c37237886892-watch-v1.mp4",
+    "originalSize": 117659453,
+    "originalSHA256": "8cf2b756ddcd31554766d042d8a632198b9d72b67fe17d2202fa27f21652ba1f",
+    "size": 41443292,
+    "sha256": "de109a324fb613ea12c15b972a40e31ef73d6a8540fa87ee08c8c2c9b06fc009",
+    "width": 1080,
+    "height": 1920,
+    "fps": "30/1",
+    "mode": "1080p-playback"
+  },
+  "/media/c414e156-41b6-4fea-88a7-e73962d9cd50.mp4": {
+    "url": "/viewing-videos/c414e156-41b6-4fea-88a7-e73962d9cd50-watch-v1.mp4",
+    "originalSize": 130893218,
+    "originalSHA256": "896a90d10959c16fbdf762565eafa700cdc6d93b9c84c00eb03d4a909d58eff0",
+    "size": 23190878,
+    "sha256": "a570a158edb7548f9acc4fa3053c3dd8f88ced8a019afb214191e9d7595a6baa",
+    "width": 1080,
+    "height": 1918,
+    "fps": "30/1",
+    "mode": "1080p-playback"
+  },
+  "/media/f0a62cbf-9a58-4a48-ace8-e85650f94c49.mp4": {
+    "url": "/viewing-videos/f0a62cbf-9a58-4a48-ace8-e85650f94c49-watch-v1.mp4",
+    "originalSize": 73638799,
+    "originalSHA256": "43303da843c5933bf34a31e777856c0f65a587dd1fc401c4fea7032caeac9aad",
+    "size": 32235729,
+    "sha256": "928bdb6f2d26b2e9d1c3b7100a86d689ba13a97f7987937be7f3154c379058c6",
+    "width": 1080,
+    "height": 1920,
+    "fps": "30/1",
+    "mode": "1080p-playback"
   }
 }
