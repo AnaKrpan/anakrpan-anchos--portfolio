@@ -1,5 +1,6 @@
 import {getStore} from '@netlify/blobs';
 import copies from '../edge-functions/lib/viewing-copies.js';
+import {viewingBootstrapKey} from '../edge-functions/lib/viewing-bootstrap-key.js';
 import {createOriginalStorage,originalStorageConfig} from '../edge-functions/lib/original-storage.js';
 import {copyViewingVideo} from '../edge-functions/lib/copy-viewing-video.js';
 
@@ -17,9 +18,9 @@ export default async function handler(request){
   const originals=createOriginalStorage(config);
   try{
     for(const [src,copy] of Object.entries(copies))await copyViewingVideo({store,originals,src,copy,origin:'https://anakrpan-anchos-potrfolio.netlify.app'});
-    await store.setJSON('viewing-copy-bootstrap/v1',{status:'verified',retryAt:0});
+    await store.setJSON(await viewingBootstrapKey(copies),{status:'verified',retryAt:0});
   }catch{
-    await store.setJSON('viewing-copy-bootstrap/v1',{status:'paused',retryAt:Date.now()+6*60*60*1000});
+    await store.setJSON(await viewingBootstrapKey(copies),{status:'paused',retryAt:Date.now()+6*60*60*1000});
     console.error('Viewing copy preparation paused; originals and current public playback preserved.');
   }
   return new Response(null,{status:200});

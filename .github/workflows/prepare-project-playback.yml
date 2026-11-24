@@ -1,0 +1,34 @@
+name: Prepare published project playback copies
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/prepare-project-playback.yml]
+permissions:
+  contents: write
+concurrency:
+  group: prepare-project-playback
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure FFmpeg is available
+        run: |
+          if ! command -v ffmpeg; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+      - name: Prepare and decode-check separate copies of published videos
+        run: python3 scripts/prepare-project-viewing-copies.py
+      - name: Save playback assets without changing portfolio content
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/viewing-videos netlify/edge-functions/lib/viewing-copies.js
+          if ! git diff --cached --quiet; then
+            git commit -m 'Add verified fast-start playback copies; preserve uploaded originals'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi

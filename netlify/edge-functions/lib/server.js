@@ -4,6 +4,7 @@ const ProjectModel=globalThis.PortfolioProjectModel;
 import { ORIGINAL_PART_SIZE } from './original-storage.js';
 import SparkMD5 from './vendor/spark-md5.js';
 import bundledViewingCopies from './viewing-copies.js';
+import {viewingBootstrapKey} from './viewing-bootstrap-key.js';
 const PART_SIZE = 512 * 1024;
 const LEGACY_PART_SIZE = 2 * 1024 * 1024;
 const MAX_SIZE = 2 * 1024 * 1024 * 1024;
@@ -65,7 +66,7 @@ function uploadKey(id) {
   return 'uploads/' + id;
 }
 const partKey = (id, part) => 'parts/' + id + '/' + part;
-export function createPortfolio({ store, password, initialDocument, originals = null, viewingCopies = bundledViewingCopies, migrationEnabled = false, projectsEnabled = false, directUploads = true, sandbox = false, dispatch = globalThis.fetch, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
+export function createPortfolio({ store, password, initialDocument, originals = null, viewingCopies = bundledViewingCopies, migrationEnabled = false, viewingCopiesEnabled = migrationEnabled, projectsEnabled = false, directUploads = true, sandbox = false, dispatch = globalThis.fetch, now = () => Date.now(), log = data => console.error(JSON.stringify(data)) }) {
   const get = (key, type = 'json') => store.get(key, { type, consistency: 'strong' });
   const entry = (key, type = 'json') => store.getWithMetadata(key, { type, consistency: 'strong' });
   const emptyState = () => ({ draft: null, published: null });
@@ -79,8 +80,8 @@ export function createPortfolio({ store, password, initialDocument, originals = 
   }
 
   async function ensureViewingCopies(urlOrigin){
-    if(!migrationEnabled||!originals||!Object.keys(viewingCopies).length)return;
-    const jobKey='viewing-copy-bootstrap/v1',previous=await entry(jobKey);
+    if(!viewingCopiesEnabled||!originals||!Object.keys(viewingCopies).length)return;
+    const jobKey=await viewingBootstrapKey(viewingCopies),previous=await entry(jobKey);
     if(previous?.data.status==='verified'||previous?.data.retryAt>now())return;
     const claimed=await store.setJSON(jobKey,{status:'running',retryAt:now()+20*60*1000},previous?{onlyIfMatch:previous.etag}:{onlyIfNew:true});
     if(!claimed.modified)return;
@@ -140,7 +141,7 @@ export function createPortfolio({ store, password, initialDocument, originals = 
       if (path === '/api/health' && request.method === 'GET') {
         await store.getMetadata('state', { consistency: 'strong' });
         await ensureViewingCopies(url.origin);
-        const setup=await get('viewing-copy-bootstrap/v1');
+        const setup=await get(await viewingBootstrapKey(viewingCopies));
         return json({ ready: true, build: 'low-bandwidth-v6', originalStorageConfigured:!!originals,viewingCopiesReady:setup?.status==='verified' });
       }
       if (path === '/uredi' && ['GET', 'HEAD'].includes(request.method)) {
@@ -499,3 +500,4 @@ export function createPortfolio({ store, password, initialDocument, originals = 
     }
   } };
 }
+
